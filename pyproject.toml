@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "go2_world"
+version = "0.1.0"
+description = "The Go2's world on the Mac: physics in the building, and a fake Mid-360 on Livox UDP"
+requires-python = ">=3.8"
+dependencies = ["numpy", "mujoco>=3.1"]
+
+[project.optional-dependencies]
+dds = ["cyclonedds==0.10.2"]
+dev = ["pytest>=7.0.0"]
+
+[tool.setuptools]
+packages = ["go2_world"]
