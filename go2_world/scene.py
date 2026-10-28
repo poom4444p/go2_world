@@ -12,6 +12,11 @@ UNITREE_MUJOCO = os.path.expanduser(
     os.environ.get("UNITREE_MUJOCO", "~/Work/unitree/unitree_mujoco"))
 GO2 = os.path.join(UNITREE_MUJOCO, "unitree_robots", "go2")
 
+# Physics step. unitree_mujoco's default 5 ms holds each PD torque too long
+# for the stand gains (kd 5): the legs chatter and the dog walks off. A real
+# Go2's motors close the PD at kHz, so the sim, not the gains, is what changes.
+SIMULATE_DT = 0.002
+
 SCENE = """<mujoco model="go2_world">
   <include file="{go2}/go2.xml"/>
   <compiler meshdir="{go2}/assets"/>
