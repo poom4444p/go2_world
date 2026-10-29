@@ -192,3 +192,28 @@ def test_round_trip_through_go2_board():
     assert len(f.xyz) > 1000 and np.all(np.linalg.norm(f.xyz, axis=1) >= 0.35)
     samples = [livox.imu(livox.parse(b)) for b in out.imu()]
     assert np.allclose(np.linalg.norm(samples[0].acc), 9.81, atol=1e-3)
+
+
+def test_go2_stands_still_at_the_physics_step():
+    """The bridge's PD, computed per lowcmd and held between steps, at the
+    stand gains: the dog must stay put (at 5 ms it walks off metres)."""
+    import mujoco
+    from go2_world.scene import SIMULATE_DT, write_scene
+
+    m = mujoco.MjModel.from_xml_path(write_scene())
+    m.opt.timestep = SIMULATE_DT
+    d = mujoco.MjData(m)
+    stand = np.array([0.0, 0.67, -1.3] * 4)
+    d.qpos[2], d.qpos[7:19] = 0.33, stand
+    kp, kd, cmd_dt = 60.0, 5.0, 0.002
+    t, next_cmd, xy0 = 0.0, 0.0, None
+    while t < 3.0:
+        if t >= next_cmd:
+            d.ctrl[:12] = kp * (stand - d.sensordata[:12]) - kd * d.sensordata[12:24]
+            next_cmd += cmd_dt
+        mujoco.mj_step(m, d)
+        t += SIMULATE_DT
+        if xy0 is None and t > 1.0:
+            xy0 = d.qpos[:2].copy()
+    assert np.linalg.norm(d.qpos[:2] - xy0) < 0.01
+    assert 0.30 < d.qpos[2] < 0.40

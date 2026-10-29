@@ -13,7 +13,7 @@ import threading
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from go2_world import _macos_timerfd  # noqa: E402,F401  (before unitree_sdk2py)
-from go2_world.scene import UNITREE_MUJOCO, write_scene  # noqa: E402
+from go2_world.scene import SIMULATE_DT, UNITREE_MUJOCO, write_scene  # noqa: E402
 
 SIM = os.path.join(UNITREE_MUJOCO, "simulate_python")
 os.chdir(SIM)
@@ -25,7 +25,9 @@ config.DOMAIN_ID = 0
 config.INTERFACE = sys.argv[1] if len(sys.argv) > 1 else "lo0"
 config.USE_JOYSTICK = 0
 config.PRINT_SCENE_INFORMATION = False
-print(f"world: {config.ROBOT_SCENE}, domain {config.DOMAIN_ID}, interface {config.INTERFACE}")
+config.SIMULATE_DT = SIMULATE_DT
+print(f"world: {config.ROBOT_SCENE}, domain {config.DOMAIN_ID}, interface {config.INTERFACE},"
+      f" step {SIMULATE_DT * 1000:.0f} ms")
 
 runpy.run_path(os.path.join(SIM, "unitree_mujoco.py"), run_name="__main__")
 
