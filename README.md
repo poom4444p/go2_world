@@ -25,7 +25,7 @@ Mac                                                    J4012 (or the Mac)
 | `go2_world/pose.py` | The pose from DDS, or a dog standing still |
 | `scripts/run_world.py` | The physics (mjpython) |
 | `scripts/run_lidar.py` | The fake Mid-360 |
-| `scripts/run_sim.py` | The physics on unitree_mujoco's flat floor, no building (mjpython) |
+| `scripts/run_sim.py` | The physics in unitree_mujoco's own go2 scene, no building (mjpython). Not flat: 8 cm bars at x = 1.2 and 1.6 m, stairs from 2.3 m, in front of the dog |
 | `scripts/run_stand.py` | Unitree's `go2_stand_example.py`, unchanged, against the sim. Never against the real dog |
 | `scripts/watch_state.py` | Body height and FR leg angles from DDS, once a second |
 
@@ -38,7 +38,7 @@ mjpython scripts/run_world.py                        # terminal 1: physics in th
 python scripts/run_lidar.py                          # terminal 2: the Mid-360
 python ~/Work/unitree/go2_board/scripts/livox_watch.py   # terminal 3: what the board receives
 python scripts/run_lidar.py --static                 # without the physics
-mjpython scripts/run_sim.py                          # the physics on a flat floor instead
+mjpython scripts/run_sim.py                          # unitree_mujoco's scene instead (bars from x = 1.1 m)
 python scripts/watch_state.py                        # body height from DDS
 python -m pytest -q
 ```

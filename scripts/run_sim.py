@@ -1,4 +1,4 @@
-"""Run unitree_mujoco's Go2 sim, flat floor, on this Mac without editing Unitree's files.
+"""Run unitree_mujoco's Go2 sim on this Mac without editing Unitree's files.
 
 Overrides four settings from simulate_python/config.py:
   DOMAIN_ID 1 -> 0   the real Go2 and Unitree's examples use domain 0
@@ -6,7 +6,9 @@ Overrides four settings from simulate_python/config.py:
   USE_JOYSTICK 1 -> 0 no gamepad attached
   SIMULATE_DT 5 -> 2 ms  at 5 ms the stand gains chatter and the dog walks off
 
-run_world.py is the same with Cyberdog's building in place of the floor.
+The scene is unitree_mujoco's go2 scene.xml, which is not flat: 8 cm bars
+at x = 1.2 and 1.6 m and stairs from 2.3 m stand in front of the dog. Walk
+forward less than ~1 m, or use run_world.py (Cyberdog's building).
 Run with mjpython (the MuJoCo viewer needs it on macOS):
   mjpython scripts/run_sim.py [interface]
 """
