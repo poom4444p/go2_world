@@ -1,6 +1,6 @@
 """The physics: unitree_mujoco's Go2 in the building, on DDS domain 0.
 
-Same as ~/Work/unitree/scripts/run_sim.py, with the building in place of the
+Same as scripts/run_sim.py, with the building in place of the
 flat floor: rt/lowcmd in, rt/lowstate and rt/sportmodestate out, so go2_board
 and the LiDAR emulator cannot tell the two apart.
 
