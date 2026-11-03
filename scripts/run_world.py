@@ -6,6 +6,7 @@ and the LiDAR emulator cannot tell the two apart.
 
   mjpython scripts/run_world.py [interface]
   python scripts/run_world.py --headless [interface]
+  python scripts/run_world.py --headless --spawn=24.0,0.0,0 en9    # the dog at the lift doors
 
 --headless: no viewer, plain python. unitree_mujoco's physics thread waits
 on the viewer's lock while a frame is drawn; with the GPU busy (VAMOS on
@@ -23,7 +24,15 @@ from go2_world.lift import LIFT_PORT, LiftServer  # noqa: E402
 from go2_world.scene import SIMULATE_DT, UNITREE_MUJOCO, write_scene  # noqa: E402
 
 HEADLESS = "--headless" in sys.argv[1:]
-ARGS = [a for a in sys.argv[1:] if a != "--headless"]
+SPAWN = None                 # --spawn X,Y,YAW: the dog elsewhere than the origin (this frame, rad)
+ARGS = []
+for a in sys.argv[1:]:
+    if a == "--headless":
+        continue
+    if a.startswith("--spawn="):
+        SPAWN = tuple(float(v) for v in a.split("=", 1)[1].split(","))
+        continue
+    ARGS.append(a)
 
 if HEADLESS:
     import mujoco.viewer
@@ -53,6 +62,19 @@ print(f"world: {config.ROBOT_SCENE}, domain {config.DOMAIN_ID}, interface {confi
       f" step {SIMULATE_DT * 1000:.0f} ms{', headless' if HEADLESS else ''}")
 
 sim = runpy.run_path(os.path.join(SIM, "unitree_mujoco.py"), run_name="__main__")
+
+if SPAWN is not None:
+    import math
+
+    import mujoco
+    x, y, yaw = SPAWN
+    with sim["locker"]:
+        d = sim["mj_data"]
+        d.qpos[0:2] = (x, y)
+        d.qpos[3:7] = (math.cos(yaw / 2), 0.0, 0.0, math.sin(yaw / 2))
+        d.qvel[:] = 0.0
+        mujoco.mj_forward(sim["mj_model"], d)
+    print(f"world: dog spawned at ({x:.2f}, {y:.2f}), yaw {math.degrees(yaw):.0f} deg", flush=True)
 
 # The lift car: moved by its own thread, called by whoever presses the button
 # (the brain stands in for the person, over UDP on LIFT_PORT).
