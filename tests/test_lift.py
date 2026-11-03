@@ -106,3 +106,12 @@ def test_emulator_sees_a_person_and_the_car_where_run_world_puts_them():
     assert nearest_ahead() == pytest.approx(2.0 - 0.22, abs=0.15)
     r.move([])
     assert nearest_ahead() == pytest.approx(before, abs=0.05)
+
+
+def test_car_floor_is_deep_with_its_top_where_it_was():
+    m = mujoco.MjModel.from_xml_path(write_scene())
+    d = mujoco.MjData(m)
+    mujoco.mj_forward(m, d)
+    g = m.geom("lift_plate")
+    top = d.geom_xpos[g.id][2] + m.geom_size[g.id][2]
+    assert m.geom_size[g.id][2] * 2 == pytest.approx(0.30) and top == pytest.approx(0.0, abs=1e-6)

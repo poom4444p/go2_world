@@ -39,6 +39,7 @@ SCENE = """<mujoco model="go2_world">
 # The car's floor and roof, frozen at floor 1 in the export, become one mocap
 # body the lift thread moves (go2_world/lift.py): the dog rides on contact.
 CAR_GEOMS = ("lift_plate", "lift_roof")
+CAR_FLOOR_DEPTH = 0.30
 CAR_BODY = "lift_car"
 
 
@@ -54,8 +55,17 @@ def building_with_car(text):
         text = text.replace(m.group(0), "")
     px, py, _ = (float(v) for v in re.search(r'pos="([^"]+)"', found["lift_plate"]).group(1).split())
     geoms = []
-    for g in found.values():
+    for name, g in found.items():
         x, y, z = (float(v) for v in re.search(r'pos="([^"]+)"', g).group(1).split())
+        if name == "lift_plate":
+            # A car floor is a structure, not a sheet: 0.30 m deep, its top where
+            # the export put it. At 0.06 m a foot (r 0.022) went through it when
+            # the thread moving the car woke late and the car rose a few cm in
+            # one step, and the dog rode up standing in it, 0.15 m too low.
+            sx, sy, sz = (float(v) for v in re.search(r'size="([^"]+)"', g).group(1).split())
+            top = z + sz
+            z, sz = top - CAR_FLOOR_DEPTH / 2, CAR_FLOOR_DEPTH / 2
+            g = re.sub(r'size="[^"]+"', f'size="{sx:.3f} {sy:.3f} {sz:.3f}"', g)
         geoms.append(re.sub(r'pos="[^"]+"', f'pos="{x - px:.3f} {y - py:.3f} {z:.3f}"', g))
     from go2_world.crowd import people_xml
     body = (f'    <body name="{CAR_BODY}" mocap="true" pos="{px:.3f} {py:.3f} 0">\n      '

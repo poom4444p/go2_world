@@ -116,7 +116,11 @@ class LiftServer:
             except socket.timeout:
                 pass
             now = time.monotonic()
-            z = self.lift.tick(now - last)
-            last = now
+            # A late wake-up is not made up: the physics sees only the newest
+            # height, so catching up would be a jump into the dog's feet. The
+            # car moves at most 2 * STEP_S worth (2.4 mm) a wake-up, and a ride
+            # on a busy machine takes a little longer instead.
+            dt, last = now - last, now
+            z = self.lift.tick(min(dt, 2 * STEP_S))
             with self.lock:
                 self.data.mocap_pos[self.mocap] = self.base + (0.0, 0.0, z)
