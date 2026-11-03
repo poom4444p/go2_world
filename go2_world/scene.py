@@ -5,6 +5,7 @@ whichever file includes it, so the scene is written out at run time with
 absolute paths into build/ (not committed) rather than kept as a file here.
 """
 import os
+import re
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BUILDING = os.path.join(ROOT, "assets", "building.xml")
@@ -35,9 +36,38 @@ SCENE = """<mujoco model="go2_world">
 """
 
 
+# The car's floor and roof, frozen at floor 1 in the export, become one mocap
+# body the lift thread moves (go2_world/lift.py): the dog rides on contact.
+CAR_GEOMS = ("lift_plate", "lift_roof")
+CAR_BODY = "lift_car"
+
+
+def building_with_car(text):
+    """The building XML with the car's geoms moved onto a mocap body at the
+    car's floor-1 position, their positions made relative to it."""
+    found = {}
+    for name in CAR_GEOMS:
+        m = re.search(rf'\n(\s*)<geom name="{name}"[^\n]*/>', text)
+        if m is None:
+            raise ValueError(f"no {name} in the building: re-export it with the lift car")
+        found[name] = m.group(0).strip()
+        text = text.replace(m.group(0), "")
+    px, py, _ = (float(v) for v in re.search(r'pos="([^"]+)"', found["lift_plate"]).group(1).split())
+    geoms = []
+    for g in found.values():
+        x, y, z = (float(v) for v in re.search(r'pos="([^"]+)"', g).group(1).split())
+        geoms.append(re.sub(r'pos="[^"]+"', f'pos="{x - px:.3f} {y - py:.3f} {z:.3f}"', g))
+    body = (f'    <body name="{CAR_BODY}" mocap="true" pos="{px:.3f} {py:.3f} 0">\n      '
+            + "\n      ".join(geoms) + "\n    </body>\n  </worldbody>")
+    return text.replace("</worldbody>", body, 1)
+
+
 def write_scene(out_dir=os.path.join(ROOT, "build")):
     os.makedirs(out_dir, exist_ok=True)
+    building = os.path.join(out_dir, "building_lift.xml")
+    with open(BUILDING) as f, open(building, "w") as out:
+        out.write(building_with_car(f.read()))
     path = os.path.join(out_dir, "scene.xml")
     with open(path, "w") as f:
-        f.write(SCENE.format(go2=GO2, building=BUILDING))
+        f.write(SCENE.format(go2=GO2, building=building))
     return path

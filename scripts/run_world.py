@@ -19,6 +19,7 @@ import threading
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from go2_world import _macos_timerfd  # noqa: E402,F401  (before unitree_sdk2py)
+from go2_world.lift import LIFT_PORT, LiftServer  # noqa: E402
 from go2_world.scene import SIMULATE_DT, UNITREE_MUJOCO, write_scene  # noqa: E402
 
 HEADLESS = "--headless" in sys.argv[1:]
@@ -51,7 +52,12 @@ config.SIMULATE_DT = SIMULATE_DT
 print(f"world: {config.ROBOT_SCENE}, domain {config.DOMAIN_ID}, interface {config.INTERFACE},"
       f" step {SIMULATE_DT * 1000:.0f} ms{', headless' if HEADLESS else ''}")
 
-runpy.run_path(os.path.join(SIM, "unitree_mujoco.py"), run_name="__main__")
+sim = runpy.run_path(os.path.join(SIM, "unitree_mujoco.py"), run_name="__main__")
+
+# The lift car: moved by its own thread, called by whoever presses the button
+# (the brain stands in for the person, over UDP on LIFT_PORT).
+LiftServer(sim["mj_model"], sim["mj_data"], sim["locker"]).start()
+print(f"lift: car at floor 1, call it on udp 127.0.0.1:{LIFT_PORT}", flush=True)
 
 # mjpython closes the viewer when this script returns: wait for the sim's threads.
 for t in threading.enumerate():
