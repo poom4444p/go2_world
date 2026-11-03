@@ -67,3 +67,42 @@ def test_called_over_udp_and_moves_the_car():
         assert "error" in json.loads(c.recvfrom(1024)[0])
     finally:
         c.close()
+
+
+# -- the people, and the emulator seeing the moving parts ---------------------
+
+def test_walkers_go_back_and_forth_on_their_lane():
+    from go2_world.crowd import Walker
+    w = Walker(1, 0.7, 6.0, 16.0, 1.0)
+    xs = [w.tick(0.1)[0] for _ in range(250)]
+    assert min(xs) >= 6.0 - 1e-9 and max(xs) <= 16.0 + 1e-9 and max(xs) > 15.5 and min(xs) < 6.5
+    assert w.pos()[1] == 0.7 and Walker(3, 0, 0, 1, 1).pos()[2] == pytest.approx(4.4)
+
+
+def test_scene_has_parked_people_that_the_dog_can_touch():
+    from go2_world.crowd import MAX_PEOPLE, PARKED
+    m = mujoco.MjModel.from_xml_path(write_scene())
+    d = mujoco.MjData(m)
+    mujoco.mj_forward(m, d)
+    for k in range(MAX_PEOPLE):
+        b = m.body(f"person_{k}")
+        assert b.mocapid[0] >= 0 and tuple(d.xpos[b.id]) == pytest.approx(PARKED)
+
+
+def test_emulator_sees_a_person_and_the_car_where_run_world_puts_them():
+    import numpy as np
+    from go2_world.raycast import Raycaster
+    from go2_world.scene import movers_building
+    r = Raycaster(movers_building())
+    pos, quat = np.array([10.0, 0.0, 0.35]), np.array([1.0, 0.0, 0.0, 0.0])   # facing +x
+    def nearest_ahead():
+        pts, _ = r.cast(pos, quat)
+        p = pts[np.any(pts != 0, axis=1)]
+        w = pos + r.t_bs + np.einsum("ij,kj->ki", r.R_bs, p)   # world (trunk faces +x, level)
+        body = w[(np.abs(w[:, 1]) < 0.15) & (w[:, 0] > pos[0]) & (w[:, 2] > 0.6) & (w[:, 2] < 1.4)]
+        return body[:, 0].min() - pos[0] if len(body) else None
+    before = nearest_ahead()
+    r.move([(12.0, 0.0, 0.0)])                     # a person 2 m ahead
+    assert nearest_ahead() == pytest.approx(2.0 - 0.22, abs=0.15)
+    r.move([])
+    assert nearest_ahead() == pytest.approx(before, abs=0.05)

@@ -57,9 +57,22 @@ def building_with_car(text):
     for g in found.values():
         x, y, z = (float(v) for v in re.search(r'pos="([^"]+)"', g).group(1).split())
         geoms.append(re.sub(r'pos="[^"]+"', f'pos="{x - px:.3f} {y - py:.3f} {z:.3f}"', g))
+    from go2_world.crowd import people_xml
     body = (f'    <body name="{CAR_BODY}" mocap="true" pos="{px:.3f} {py:.3f} 0">\n      '
-            + "\n      ".join(geoms) + "\n    </body>\n  </worldbody>")
+            + "\n      ".join(geoms) + "\n    </body>\n" + people_xml() + "\n  </worldbody>")
     return text.replace("</worldbody>", body, 1)
+
+
+def movers_building(out_dir=os.path.join(ROOT, "build")):
+    """The building with its moving parts (the lift car, the people), alone:
+    what the LiDAR emulator casts into. Written next to the scene."""
+    os.makedirs(out_dir, exist_ok=True)
+    path = os.path.join(out_dir, "building_movers.xml")
+    with open(BUILDING) as f:
+        inner = building_with_car(f.read())
+    with open(path, "w") as out:
+        out.write(inner)
+    return path
 
 
 def write_scene(out_dir=os.path.join(ROOT, "build")):
