@@ -27,9 +27,13 @@ from go2_world.scene import SIMULATE_DT, UNITREE_MUJOCO, write_scene  # noqa: E4
 HEADLESS = "--headless" in sys.argv[1:]
 SPAWN = None                 # --spawn X,Y,YAW: the dog elsewhere than the origin (this frame, rad)
 PEOPLE = 0                   # --people=N: people walking the corridors (go2_world/crowd.py)
+LIFT_LISTEN = "127.0.0.1"    # --lift-listen=IP: take lift calls there (the brain on another machine)
 ARGS = []
 for a in sys.argv[1:]:
     if a == "--headless":
+        continue
+    if a.startswith("--lift-listen="):
+        LIFT_LISTEN = a.split("=", 1)[1]
         continue
     if a.startswith("--people="):
         PEOPLE = int(a.split("=", 1)[1])
@@ -83,8 +87,8 @@ if SPAWN is not None:
 
 # The lift car: moved by its own thread, called by whoever presses the button
 # (the brain stands in for the person, over UDP on LIFT_PORT).
-lift = LiftServer(sim["mj_model"], sim["mj_data"], sim["locker"]).start()
-print(f"lift: car at floor 1, call it on udp 127.0.0.1:{LIFT_PORT}", flush=True)
+lift = LiftServer(sim["mj_model"], sim["mj_data"], sim["locker"], host=LIFT_LISTEN).start()
+print(f"lift: car at floor 1, call it on udp {LIFT_LISTEN}:{LIFT_PORT}", flush=True)
 # The people, and the moving parts' positions for the LiDAR emulator.
 Movers(sim["mj_model"], sim["mj_data"], sim["locker"], PEOPLE, lift=lift.lift).start()
 print(f"world: {PEOPLE} people walking; movers to udp 127.0.0.1:{MOVERS_PORT}", flush=True)
