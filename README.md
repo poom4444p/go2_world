@@ -35,6 +35,7 @@ Mac                                                    J4012 (or the Mac)
 conda activate unitree_sim
 pip install -e ~/Work/unitree/go2_world              # once
 mjpython scripts/run_world.py                        # terminal 1: physics in the building
+python scripts/run_world.py --headless               # the same without the viewer: steadier timing
 python scripts/run_lidar.py                          # terminal 2: the Mid-360
 python ~/Work/unitree/go2_board/scripts/livox_watch.py   # terminal 3: what the board receives
 python scripts/run_lidar.py --static                 # without the physics
