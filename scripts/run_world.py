@@ -8,6 +8,10 @@ and the LiDAR emulator cannot tell the two apart.
   python scripts/run_world.py --headless [interface]
   python scripts/run_world.py --headless --spawn=24.0,0.0,0 en9    # the dog at the lift doors
 
+--held-pd: unitree_mujoco's own motor model, the torque worked out once per
+LowCmd and held until the next. By default the PD runs every physics step
+on the last command, as the dog's drivers do (go2_world/motor_pd.py).
+
 --headless: no viewer, plain python. unitree_mujoco's physics thread waits
 on the viewer's lock while a frame is drawn; with the GPU busy (VAMOS on
 MPS) that held the physics 50-130 ms at a time, long enough for go2_board's
@@ -25,12 +29,13 @@ from go2_world.lift import LIFT_PORT, LiftServer  # noqa: E402
 from go2_world.scene import SIMULATE_DT, UNITREE_MUJOCO, write_scene  # noqa: E402
 
 HEADLESS = "--headless" in sys.argv[1:]
+HELD_PD = "--held-pd" in sys.argv[1:]  # unitree_mujoco's own: torque once per LowCmd (go2_world/motor_pd.py)
 SPAWN = None                 # --spawn X,Y,YAW: the dog elsewhere than the origin (this frame, rad)
 PEOPLE = 0                   # --people=N: people walking the corridors (go2_world/crowd.py)
 LIFT_LISTEN = "127.0.0.1"    # --lift-listen=IP: take lift calls there (the brain on another machine)
 ARGS = []
 for a in sys.argv[1:]:
-    if a == "--headless":
+    if a in ("--headless", "--held-pd"):
         continue
     if a.startswith("--lift-listen="):
         LIFT_LISTEN = a.split("=", 1)[1]
@@ -68,7 +73,16 @@ config.USE_JOYSTICK = 0
 config.PRINT_SCENE_INFORMATION = False
 config.SIMULATE_DT = SIMULATE_DT
 print(f"world: {config.ROBOT_SCENE}, domain {config.DOMAIN_ID}, interface {config.INTERFACE},"
-      f" step {SIMULATE_DT * 1000:.0f} ms{', headless' if HEADLESS else ''}")
+      f" step {SIMULATE_DT * 1000:.0f} ms{', headless' if HEADLESS else ''},"
+      f" motor PD {'once per LowCmd (held)' if HELD_PD else 'every step'}")
+
+if not HELD_PD:
+    # The motors' PD every physics step from the last command, as the dog's
+    # drivers do -- not once per LowCmd, held. See go2_world/motor_pd.py.
+    import unitree_sdk2py_bridge  # noqa: E402  (unitree_mujoco's, from SIM)
+
+    from go2_world import motor_pd  # noqa: E402
+    motor_pd.install(unitree_sdk2py_bridge.UnitreeSdk2Bridge)
 
 sim = runpy.run_path(os.path.join(SIM, "unitree_mujoco.py"), run_name="__main__")
 
