@@ -13,7 +13,7 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from go2_world.emulator import Emulator, Impairments, UdpOut  # noqa: E402
 from go2_world.raycast import Raycaster  # noqa: E402
-from go2_world.scene import BUILDING  # noqa: E402
+from go2_world.scene import BUILDING, movers_building  # noqa: E402
 
 
 def main():
@@ -30,7 +30,12 @@ def main():
     ap.add_argument("--seconds", type=float, default=float("inf"))
     a = ap.parse_args()
 
-    ray = Raycaster(BUILDING, "dense" if a.dense else "cyberdog")
+    # The building with its moving parts (lift car, people), placed from
+    # run_world's word; --static has no run_world, so the plain building.
+    if a.static:
+        ray = Raycaster(BUILDING, "dense" if a.dense else "cyberdog")
+    else:
+        ray = Raycaster(movers_building(), "dense" if a.dense else "cyberdog").listen()
     if a.static:
         from go2_world.pose import StaticPose
         pose = StaticPose()

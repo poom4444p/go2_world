@@ -23,7 +23,9 @@ Mac                                                    J4012 (or the Mac)
 | `go2_world/livox_packets.py` | Livox SDK2 point (type 1) and IMU (type 0) packets, CRC-32 and all |
 | `go2_world/emulator.py` | 10 Hz frames cast in 10 sectors at the pose of the moment, 200 Hz IMU, noise/drop/delay |
 | `go2_world/pose.py` | The pose from DDS, or a dog standing still |
-| `scripts/run_world.py` | The physics (mjpython) |
+| `go2_world/lift.py` | The lift car, moving: a mocap body the dog rides on contact, eased at 0.5 m/s², called to a floor over UDP 9880 (`{"call": 3}`) by whoever presses the button |
+| `go2_world/crowd.py` | People walking lanes of the corridors (`--people=N`, up to 6): solid capsules the dog can bump, their positions and the lift car's sent to the LiDAR emulator (UDP 9882) so the Mid-360 sees them |
+| `scripts/run_world.py` | The physics (mjpython, or `--headless` with plain python), with the lift running; `--people=N`, `--spawn=X,Y,YAW` |
 | `scripts/run_lidar.py` | The fake Mid-360 |
 | `scripts/run_sim.py` | The physics in unitree_mujoco's own go2 scene, no building (mjpython). Not flat: 8 cm bars at x = 1.2 and 1.6 m, stairs from 2.3 m, in front of the dog |
 | `scripts/run_stand.py` | Unitree's `go2_stand_example.py`, unchanged, against the sim. Never against the real dog |
