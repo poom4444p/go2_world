@@ -7,6 +7,7 @@ and the LiDAR emulator cannot tell the two apart.
   mjpython scripts/run_world.py [interface]
   python scripts/run_world.py --headless [interface]
   python scripts/run_world.py --headless --spawn=24.0,0.0,0 en9    # the dog at the lift doors
+  python scripts/run_world.py --headless --record=run.mp4 en9      # and a video of it (go2_world/recorder.py)
 
 --held-pd: unitree_mujoco's own motor model, the torque worked out once per
 LowCmd and held until the next. By default the PD runs every physics step
@@ -33,6 +34,7 @@ HELD_PD = "--held-pd" in sys.argv[1:]  # unitree_mujoco's own: torque once per L
 SPAWN = None                 # --spawn X,Y,YAW: the dog elsewhere than the origin (this frame, rad)
 PEOPLE = 0                   # --people=N: people walking the corridors (go2_world/crowd.py)
 LIFT_LISTEN = "127.0.0.1"    # --lift-listen=IP: take lift calls there (the brain on another machine)
+RECORD = None               # --record=PATH: the world to an MP4 while it runs
 ARGS = []
 for a in sys.argv[1:]:
     if a in ("--headless", "--held-pd"):
@@ -42,6 +44,9 @@ for a in sys.argv[1:]:
         continue
     if a.startswith("--people="):
         PEOPLE = int(a.split("=", 1)[1])
+        continue
+    if a.startswith("--record="):
+        RECORD = os.path.abspath(a.split("=", 1)[1])
         continue
     if a.startswith("--spawn="):
         SPAWN = tuple(float(v) for v in a.split("=", 1)[1].split(","))
@@ -106,6 +111,22 @@ print(f"lift: car at floor 1, call it on udp {LIFT_LISTEN}:{LIFT_PORT}", flush=T
 # The people, and the moving parts' positions for the LiDAR emulator.
 Movers(sim["mj_model"], sim["mj_data"], sim["locker"], PEOPLE, lift=lift.lift).start()
 print(f"world: {PEOPLE} people walking; movers to udp 127.0.0.1:{MOVERS_PORT}", flush=True)
+
+if RECORD:
+    import signal
+
+    from go2_world.recorder import Recorder
+    rec = Recorder(sim["mj_model"], sim["mj_data"], sim["locker"], RECORD).start()
+
+    def _finish(signum, frame):
+        # Stopped with pkill (SIGTERM) or Ctrl-C: finish the file, then go, as
+        # the signal would have. The sim's threads are not daemons, so exit hard.
+        rec.close()
+        os._exit(128 + signum)
+
+    signal.signal(signal.SIGTERM, _finish)
+    signal.signal(signal.SIGINT, _finish)
+    print(f"recorder: {RECORD}", flush=True)
 
 # mjpython closes the viewer when this script returns: wait for the sim's threads.
 for t in threading.enumerate():

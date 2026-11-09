@@ -12,6 +12,8 @@ dependencies = ["numpy", "mujoco>=3.1"]
 [project.optional-dependencies]
 dds = ["cyclonedds==0.10.2"]
 dev = ["pytest>=7.0.0"]
+# --record: the world to an MP4 (go2_world/recorder.py)
+record = ["imageio[ffmpeg]", "Pillow"]
 
 [tool.setuptools]
 packages = ["go2_world"]

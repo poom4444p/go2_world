@@ -25,7 +25,8 @@ Mac                                                    J4012 (or the Mac)
 | `go2_world/pose.py` | The pose from DDS, or a dog standing still |
 | `go2_world/lift.py` | The lift car, moving: a mocap body the dog rides on contact, eased at 0.5 m/s², called to a floor over UDP 9880 (`{"call": 3}`) by whoever presses the button |
 | `go2_world/crowd.py` | People walking lanes of the corridors (`--people=N`, up to 6): solid capsules the dog can bump, who make way for it (step aside, walk past slowly, or stop short and after 8 s turn back), their positions and the lift car's sent to the LiDAR emulator (UDP 9882) so the Mid-360 sees them |
-| `scripts/run_world.py` | The physics (mjpython, or `--headless` with plain python), with the lift running; `--people=N`, `--spawn=X,Y,YAW` |
+| `scripts/run_world.py` | The physics (mjpython, or `--headless` with plain python), with the lift running; `--people=N`, `--spawn=X,Y,YAW`, `--record=PATH` |
+| `go2_world/recorder.py` | `--record=PATH`: the world to an MP4 as it runs (15 fps, a camera chasing the dog, the lift car from the corridor while the dog rides it), each frame stamped with world time, floor and the dog's position |
 | `scripts/run_lidar.py` | The fake Mid-360 |
 | `scripts/run_sim.py` | The physics in unitree_mujoco's own go2 scene, no building (mjpython). Not flat: 8 cm bars at x = 1.2 and 1.6 m, stairs from 2.3 m, in front of the dog |
 | `scripts/run_stand.py` | Unitree's `go2_stand_example.py`, unchanged, against the sim. Never against the real dog |
@@ -38,6 +39,7 @@ conda activate unitree_sim
 pip install -e ~/Work/unitree/go2_world              # once
 mjpython scripts/run_world.py                        # terminal 1: physics in the building
 python scripts/run_world.py --headless               # the same without the viewer: steadier timing
+python scripts/run_world.py --headless --record=run.mp4   # and record it (pip install -e .[record] once)
 python scripts/run_lidar.py                          # terminal 2: the Mid-360
 python ~/Work/unitree/go2_board/scripts/livox_watch.py   # terminal 3: what the board receives
 python scripts/run_lidar.py --static                 # without the physics
@@ -49,6 +51,12 @@ python -m pytest -q
 Switches: `--dense` (the real unit's ~200k points/s, 210 packets a frame),
 `--noise 0.02` (m), `--drop 0.01`, `--delay-ms 5 --jitter-ms 3`,
 `--host <J4012 IP>` to send over Ethernet instead of loopback.
+
+`--record` copies the physics' state under its lock (well under a millisecond)
+and renders outside it, so the physics does not wait on frames; frames are
+dropped if rendering falls behind. The MP4 is fragmented: a killed run still
+leaves a file that plays. Coordinates on the frames are go2_world's (the dog
+spawns at the origin), not the brain's map frame.
 
 ## What it does and does not copy
 
