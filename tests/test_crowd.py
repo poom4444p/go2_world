@@ -198,3 +198,26 @@ def test_no_overtaking_into_somebody_coming():
     assert max(p[0] for p, _ in out) < max(d[0] for _, d in out)   # behind the dog
     assert all(gap(p, d) >= MIN_GAP - 1e-6 for p, d in out)
     assert max(p[1] for p, _ in path) > -0.6 + 0.5          # without anybody coming, it went out
+
+
+def test_a_stander_stays_put_whatever_the_dog_does():
+    s = crowd.Stander(3.0, 0.8)
+    for _ in range(500):
+        p = s.tick(DT, (3.5, 0.8, DOG_Z), lambda side: 0.0, (0.5, 0.0))
+    assert p == (3.0, 0.8, 0.0)
+
+
+def test_a_stander_leaves_after_its_time():
+    s = crowd.Stander(3.0, 0.8, floor=3, stay=2.0)
+    assert s.tick(1.0) == (3.0, 0.8, 2 * crowd.FLOOR_HEIGHT)
+    s.tick(1.5)
+    assert s.pos() == crowd.PARKED
+
+
+def test_movers_put_standers_after_the_walkers():
+    m = mujoco.MjModel.from_xml_string(WALLED.format(people=crowd.people_xml()))
+    d = mujoco.MjData(m)
+    movers = Movers(m, d, threading.Lock(), 2, standers=[crowd.Stander(3.0, 0.8)])
+    assert movers.state()["people"][2] == [3.0, 0.8, 0.0]
+    with pytest.raises(ValueError):
+        Movers(m, d, threading.Lock(), crowd.MAX_PEOPLE, standers=[crowd.Stander(0, 0)])

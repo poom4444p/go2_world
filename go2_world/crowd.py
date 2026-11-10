@@ -185,19 +185,41 @@ class Walker:
         return self.pos()
 
 
+class Stander:
+    """Somebody standing still where they are put -- on the phone, reading a
+    sign -- who does not make way for the dog, for `stay` seconds (None: for
+    good) and then is gone. A test of what the dog does about a person who
+    will not move, which the walkers, who always do, never are (--stand)."""
+
+    def __init__(self, x, y, floor=1, stay=None):
+        self.x, self.y, self.z = x, y, (floor - 1) * FLOOR_HEIGHT
+        self.stay, self.t = stay, 0.0
+
+    def pos(self):
+        if self.stay is not None and self.t > self.stay:
+            return PARKED
+        return (self.x, self.y, self.z)
+
+    def tick(self, dt, *_):
+        self.t += dt
+        return self.pos()
+
+
 class Movers:
     """Walks the people in the physics and tells the emulator where they and
     the lift car are, 20 times a second."""
 
-    def __init__(self, model, data, lock, n_people, lift=None, emulator=("127.0.0.1", MOVERS_PORT)):
-        if n_people > MAX_PEOPLE:
-            raise ValueError(f"at most {MAX_PEOPLE} people")
+    def __init__(self, model, data, lock, n_people, lift=None, emulator=("127.0.0.1", MOVERS_PORT),
+                 standers=()):
+        if n_people + len(standers) > MAX_PEOPLE:
+            raise ValueError(f"at most {MAX_PEOPLE} people, walking and standing")
         self.model, self.data, self.lock, self.lift = model, data, lock, lift
         self.mocap = [int(model.body(f"person_{k}").mocapid[0]) for k in range(MAX_PEOPLE)]
         self.body = [int(model.body(f"person_{k}").id) for k in range(MAX_PEOPLE)]
         self._geom = np.zeros(1, np.int32)
         self.walkers = [Walker(*ROUTES[k], phase=0.37 * k, keep_right=KEEP_RIGHT)
                         for k in range(n_people)]
+        self.standers = list(standers)          # bodies after the walkers'
         self.emulator = emulator
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
@@ -206,7 +228,7 @@ class Movers:
         return self
 
     def state(self):
-        return {"people": [list(w.pos()) for w in self.walkers],
+        return {"people": [list(w.pos()) for w in self.walkers + self.standers],
                 "lift_z": None if self.lift is None else self.lift.z}
 
     def dog(self):
@@ -251,6 +273,8 @@ class Movers:
                     self.data.mocap_pos[self.mocap[k]] = w.tick(
                         dt, dog, lambda side, k=k, w=w: self.room(k, w, side), dog_v,
                         lambda side, k=k, w=w: self.oncoming(k, w, side))
+                for j, s in enumerate(self.standers):
+                    self.data.mocap_pos[self.mocap[len(self.walkers) + j]] = s.tick(dt)
             if now - sent >= 0.05:
                 sent = now
                 try:
