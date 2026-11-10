@@ -89,6 +89,12 @@ if not HELD_PD:
     from go2_world import motor_pd  # noqa: E402
     motor_pd.install(unitree_sdk2py_bridge.UnitreeSdk2Bridge)
 
+# rt/lowstate's tick: the simulated time, for the Mid-360's IMU (pose.install_tick)
+import unitree_sdk2py_bridge  # noqa: E402,F811  (unitree_mujoco's, from SIM)
+
+from go2_world.pose import install_tick  # noqa: E402
+install_tick(unitree_sdk2py_bridge.UnitreeSdk2Bridge)
+
 sim = runpy.run_path(os.path.join(SIM, "unitree_mujoco.py"), run_name="__main__")
 
 if SPAWN is not None:

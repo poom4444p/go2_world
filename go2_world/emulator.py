@@ -33,6 +33,50 @@ class Impairments:
         self.rng = np.random.default_rng(seed)
 
 
+class ImuNoise:
+    """What a real Mid-360's IMU adds to the truth, per axis, in its own frame.
+
+    The defaults (realistic()) are a little worse than the ICM-40609 the unit
+    carries, as best known without one on the bench: white noise from its
+    noise densities at 200 Hz, a turn-on gyro bias of +-GYRO_BIAS (each axis
+    a random sign), drifting as a random walk, and the accelerometer's offset
+    left after a level calibration (an uncalibrated one tilts "level" by about
+    1 deg, which the board cannot learn: it would be calibrated on the dog).
+    Off -- ImuNoise() -- the IMU is exactly the physics, as before."""
+
+    GYRO_NOISE = 0.05        # deg/s, 1 sigma per sample (0.0038 deg/s/sqrt(Hz) * 10)
+    GYRO_BIAS = 0.5          # deg/s, turn-on bias per axis
+    GYRO_WALK = 0.002        # deg/s/sqrt(s), bias random walk
+    ACC_NOISE = 0.01         # m/s^2, 1 sigma per sample (70 ug/sqrt(Hz) * 10)
+    ACC_BIAS = 0.03          # m/s^2 per axis left after calibration (~0.2 deg of tilt)
+
+    def __init__(self, gyro_noise=0.0, gyro_bias=0.0, gyro_walk=0.0, acc_noise=0.0,
+                 acc_bias=0.0, seed=0):
+        self.rng = np.random.default_rng(seed)
+        r = math.radians
+        self.gyro_noise, self.gyro_walk = r(gyro_noise), r(gyro_walk)
+        self.gyro_b = r(gyro_bias) * self.rng.choice([-1.0, 1.0], 3)
+        self.acc_noise = acc_noise
+        self.acc_b = acc_bias * self.rng.choice([-1.0, 1.0], 3)
+
+    @classmethod
+    def realistic(cls, seed=0, gyro_bias=None):
+        return cls(cls.GYRO_NOISE, cls.GYRO_BIAS if gyro_bias is None else gyro_bias,
+                   cls.GYRO_WALK, cls.ACC_NOISE, cls.ACC_BIAS, seed)
+
+    def __call__(self, gyro, acc, dt):
+        """(gyro rad/s, acc m/s^2) as measured, dt s after the last sample."""
+        if self.gyro_walk:
+            self.gyro_b = self.gyro_b + self.rng.normal(0.0, self.gyro_walk * math.sqrt(dt), 3)
+        g = gyro + self.gyro_b
+        a = acc + self.acc_b
+        if self.gyro_noise:
+            g = g + self.rng.normal(0.0, self.gyro_noise, 3)
+        if self.acc_noise:
+            a = a + self.rng.normal(0.0, self.acc_noise, 3)
+        return g, a
+
+
 class UdpOut:
     """Sends from the sensor's own ports, as the real unit does."""
 
@@ -58,8 +102,9 @@ class UdpOut:
 
 
 class Emulator:
-    def __init__(self, raycaster, pose, out, impair=None, clock=time.monotonic):
+    def __init__(self, raycaster, pose, out, impair=None, clock=time.monotonic, imu_noise=None):
         self.ray, self.pose, self.out = raycaster, pose, out
+        self.imu_noise = imu_noise or ImuNoise()
         self.imp = impair or Impairments()
         self.clock = clock
         self.t0 = clock()
@@ -146,7 +191,9 @@ class Emulator:
         if p is None:
             return
         R_sb = self.ray.R_bs.T                 # the IMU sits in the sensor, axes as the points
-        pkt = lp.imu_packet(R_sb @ p.gyro, R_sb @ p.acc / G, round(t * 1e9), self.imu_cnt)
+        # per wall second, as a real-time IMU turns: see pose.Rate
+        gyro, acc = self.imu_noise(R_sb @ p.gyro * getattr(p, "rtf", 1.0), R_sb @ p.acc, self.imu_s)
+        pkt = lp.imu_packet(gyro, acc / G, round(t * 1e9), self.imu_cnt)
         self.imu_cnt += 1
         self._send(pkt, mid360.IMU_HOST_PORT, now)
 
