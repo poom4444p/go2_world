@@ -6,12 +6,13 @@
   python scripts/run_lidar.py --host <J4012 IP>      # to the J4012 over Ethernet
 """
 import argparse
+import math
 import os
 import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from go2_world.emulator import Emulator, Impairments, UdpOut  # noqa: E402
+from go2_world.emulator import Emulator, ImuNoise, Impairments, UdpOut  # noqa: E402
 from go2_world.raycast import Raycaster  # noqa: E402
 from go2_world.scene import BUILDING, movers_building  # noqa: E402
 
@@ -26,6 +27,12 @@ def main():
     ap.add_argument("--drop", type=float, default=0.0, help="packet drop probability")
     ap.add_argument("--delay-ms", type=float, default=0.0)
     ap.add_argument("--jitter-ms", type=float, default=0.0)
+    ap.add_argument("--imu-noise", action="store_true",
+                    help="the IMU as a real unit's: noise, gyro bias and its drift, "
+                         "accelerometer offset (emulator.ImuNoise)")
+    ap.add_argument("--gyro-bias", type=float, default=None, metavar="DEG_S",
+                    help="with --imu-noise: turn-on gyro bias per axis, deg/s "
+                         f"(default {ImuNoise.GYRO_BIAS})")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--seconds", type=float, default=float("inf"))
     a = ap.parse_args()
@@ -43,9 +50,13 @@ def main():
         from go2_world.pose import DdsPose
         pose = DdsPose(a.interface)
         pose.wait()
+    imu = ImuNoise.realistic(a.seed, a.gyro_bias) if a.imu_noise else None
     emu = Emulator(ray, pose, UdpOut(a.host),
-                   Impairments(a.noise, a.drop, a.delay_ms, a.jitter_ms, a.seed))
+                   Impairments(a.noise, a.drop, a.delay_ms, a.jitter_ms, a.seed), imu_noise=imu)
     print(f"mid360: {ray.n} rays/frame -> {a.host}:56301 points, :56401 imu")
+    if imu is not None:
+        print("mid360: imu noise on, gyro bias (deg/s) "
+              + " ".join(f"{math.degrees(b):+.2f}" for b in imu.gyro_b))
     t = time.monotonic()
     try:
         emu.run(a.seconds)
