@@ -80,6 +80,17 @@ PASS_V = 0.4                 # m/s walking past it
 WAIT_M = 1.2                 # m, centre to centre, at which one who cannot pass stops
 MIN_GAP = 0.10               # m, surface to surface: never nearer the dog than this
 ACCEL = 0.8                  # m/s^2, speeding up and slowing down
+SAME_WAY_V = 0.2             # m/s of the dog along their way: it is going their way.
+                             # Then they overtake it at their own pace, as people do,
+                             # or, with no room to, follow at its pace: not hover
+                             # behind it at PASS_V, which held them there until the
+                             # dog stopped, and the dog stopped for them (HIL 11-10)
+RETURN_M = 2.0               # m past the dog before an overtaker steps back into
+                             # its lane: at BEHIND_M they cut in 1 m in front of it
+ONCOMING_M = 6.0             # m ahead in the other half with somebody coming: no
+                             # stepping out to overtake, follow instead
+OVERTAKE_SIDE_M = 1.0        # m stepped out to overtake: over into the other half
+OVERTAKE_TIE = 0.3           # m: a dog this near their line is passed on their left
 GIVE_UP_S = 8.0              # s stopped for the dog before turning back
 
 
@@ -115,26 +126,40 @@ class Walker:
         """Their lane, on the right of their way along x: -y going +x."""
         return -self.u * self.off
 
-    def aim(self, dog, room):
+    def aim(self, dog, room, dog_v=None, oncoming=None):
         """(speed, side step) wanted with the dog at `dog` (x, y, z), or None
-        for no dog. room(side) -> metres free that way (+1: +y) from the lane."""
+        for no dog. room(side) -> metres free that way (+1: +y) from the lane.
+        dog_v: its (vx, vy), m/s, or None for a dog standing still.
+        oncoming(side) -> somebody coming the other way on that side, within
+        ONCOMING_M: no stepping out to overtake into them."""
         if dog is None or not DOG_FLOOR_Z[0] <= dog[2] - self.z < DOG_FLOOR_Z[1]:
             return self.speed, 0.0
         ahead = (dog[0] - self.x) * self.u
         lat = dog[1] - (self.y + self.o)
-        if not (-BEHIND_M < ahead < NOTICE_M and abs(lat) < NOTICE_LAT):
+        along = 0.0 if dog_v is None else dog_v[0] * self.u    # the lanes run along x
+        same_way = along >= SAME_WAY_V
+        passed = RETURN_M if same_way and self.o else BEHIND_M   # overtaken: clear of it first
+        if not (-passed < ahead < NOTICE_M and abs(lat) < NOTICE_LAT):
             return self.speed, 0.0
         side = -1.0 if lat > 0 else 1.0 if lat < 0 else math.copysign(1.0, self.y or 1.0)
+        if same_way and abs(lat) < OVERTAKE_TIE:
+            side = self.u             # in its lane: overtake on their left (+y going +x)
         free = math.inf if room is None else room(side)
-        o = side * max(0.0, min(SIDE_M, free - RADIUS - WALL_KEEP))
+        reach = OVERTAKE_SIDE_M if same_way else SIDE_M
+        if same_way and ahead > 0 and not self.o and oncoming is not None and oncoming(side):
+            reach = 0.0               # not out into somebody coming: behind the dog
+        o = side * max(0.0, min(reach, free - RADIUS - WALL_KEEP))
         if ahead <= 0 or abs(dog[1] - (self.y + o)) >= PASS_SEP:
-            return min(self.speed, PASS_V), o
+            return (self.speed if same_way else min(self.speed, PASS_V)), o
         near = math.hypot(dog[0] - self.x, dog[1] - (self.y + self.o))
+        if same_way:                  # no room to pass it: behind it, at its pace
+            return (min(self.speed, along) if near < WAIT_M + DOG_R else self.speed), o
         return (0.0 if near < WAIT_M + DOG_R else min(self.speed, PASS_V)), o
 
-    def tick(self, dt, dog=None, room=None):
-        """Walk dt seconds. dog: its trunk (x, y, z) or None; room: as in aim()."""
-        want_v, want_o = self.aim(dog, room)
+    def tick(self, dt, dog=None, room=None, dog_v=None, oncoming=None):
+        """Walk dt seconds. dog: its trunk (x, y, z) or None; room, dog_v,
+        oncoming: as in aim()."""
+        want_v, want_o = self.aim(dog, room, dog_v, oncoming)
         self.v = _toward(self.v, want_v, ACCEL * dt)
         o = _toward(self.o, want_o, SIDE_V * dt)
         x = self.x + self.u * self.v * dt
@@ -188,6 +213,10 @@ class Movers:
         """The dog's trunk (x, y, z): the scene's first joint is its free joint."""
         return tuple(float(v) for v in self.data.qpos[0:3])
 
+    def dog_v(self):
+        """Its (vx, vy), world frame, m/s: the free joint's linear velocity."""
+        return tuple(float(v) for v in self.data.qvel[0:2])
+
     def room(self, k, w, side):
         """Metres free from walker k's lane sideways (+1: +y), at ROOM_H:
         walls, the trolley, the dog and other people all count."""
@@ -200,6 +229,16 @@ class Movers:
                 best = min(best, d)
         return best
 
+    def oncoming(self, k, w, side):
+        """Somebody walking against walker k, on its `side` (+1: +y) of it,
+        within ONCOMING_M ahead of it."""
+        for j, v in enumerate(self.walkers):
+            if j == k or v.z != w.z or v.u != -w.u:
+                continue
+            if 0.0 < (v.x - w.x) * w.u < ONCOMING_M and (v.y + v.o - w.y) * side > 0.3:
+                return True
+        return False
+
     def _run(self):
         last, sent = time.monotonic(), 0.0
         while True:
@@ -207,10 +246,11 @@ class Movers:
             now = time.monotonic()
             dt, last = now - last, now
             with self.lock:
-                dog = self.dog()
+                dog, dog_v = self.dog(), self.dog_v()
                 for k, w in enumerate(self.walkers):
                     self.data.mocap_pos[self.mocap[k]] = w.tick(
-                        dt, dog, lambda side, k=k, w=w: self.room(k, w, side))
+                        dt, dog, lambda side, k=k, w=w: self.room(k, w, side), dog_v,
+                        lambda side, k=k, w=w: self.oncoming(k, w, side))
             if now - sent >= 0.05:
                 sent = now
                 try:
