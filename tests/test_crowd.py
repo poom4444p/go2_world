@@ -111,3 +111,26 @@ def test_movers_find_the_wall_and_the_dog_in_the_scene():
     mujoco.mj_forward(m, d)
     assert movers.room(0, w, +1.0) == pytest.approx(1.4 - 0.05 - 0.7, abs=1e-6)   # its own capsule skipped
     assert movers.room(0, w, -1.0) == math.inf
+
+
+def test_keeping_right_they_walk_on_the_right_of_their_way():
+    east = Walker(1, 0.7, 6.0, 16.0, 1.0, keep_right=True)            # going +x first
+    assert east.u > 0 and east.y == -0.7                              # +x: right is -y
+    west = Walker(1, 0.7, 16.0, 6.0, 1.0, keep_right=True)            # going -x first
+    assert west.u < 0 and west.y == 0.7
+
+
+def test_keeping_right_they_cross_over_after_turning_round():
+    w = Walker(1, 0.7, 6.0, 16.0, 1.0, keep_right=True)
+    w.x = 15.95
+    for _ in range(400):                                             # 4 s at 10 ms
+        w.tick(0.01)
+    assert w.u < 0 and abs(w.y - 0.7) < 1e-9                         # back west, on the north side
+
+
+def test_fixed_lanes_unless_asked():
+    w = Walker(1, 0.7, 16.0, 6.0, 1.0)
+    assert w.y == 0.7
+    for _ in range(100):
+        w.tick(0.01)
+    assert w.y == 0.7

@@ -18,6 +18,12 @@ that side allows), and walks past slowly if that leaves PASS_SEP between
 them; else stops short and waits, and after GIVE_UP_S turns back. Never
 closer than MIN_GAP to the dog, and back to the lane once past it. Speed
 and the side step change at ACCEL and SIDE_V: nobody jumps.
+
+And they keep to the right of the corridor (KEEP_RIGHT), as people in Denmark
+do: a lane's y is how far off the corridor's middle they walk, on their right
+whichever way they are going, so somebody coming the other way passes on the
+dog's left when it keeps right too. Turning round at a lane's end, they cross
+over at SIDE_V as they walk back.
 """
 import json
 import math
@@ -32,8 +38,10 @@ PARKED = (0.0, 0.0, -20.0)
 RADIUS, HEIGHT = 0.22, 1.70            # a shoulder's half-width, standing height
 MOVERS_PORT = 9882                     # run_world -> run_lidar: people and the lift car
 FLOOR_HEIGHT = 2.2
+KEEP_RIGHT = True                      # people walk on their right (Denmark); False: fixed lanes
 
 # Lanes in this (go2_world) frame: floor, y, x from, x to, walking speed.
+# With KEEP_RIGHT the sign of y is ignored: it is the side of their travel.
 # Floor 1's corridor runs along x at y = 0 (walls at about +-1.4); the
 # trolley stands at x 2.4..3.6 on the south half; the lift is at the east end.
 ROUTES = [
@@ -82,8 +90,9 @@ def _toward(a, b, step):
 class Walker:
     """Back and forth along one lane at a floor, making way for the dog."""
 
-    def __init__(self, floor, y, x0, x1, speed, phase=0.0):
+    def __init__(self, floor, y, x0, x1, speed, phase=0.0, keep_right=False):
         self.z = (floor - 1) * FLOOR_HEIGHT
+        self.keep_right, self.off = keep_right, abs(y)
         self.y, self.x0, self.x1, self.speed = y, x0, x1, speed
         self.lo, self.hi = min(x0, x1), max(x0, x1)
         span = self.hi - self.lo
@@ -93,12 +102,18 @@ class Walker:
             self.x, self.u = x0 + out * s, out
         else:
             self.x, self.u = x1 - out * (s - span), -out
+        if keep_right:
+            self.y = self.lane_y()
         self.v = speed               # m/s along the lane, now
         self.o = 0.0                 # m stepped aside from the lane, now
         self.waited = 0.0            # s stopped for the dog
 
     def pos(self):
         return (self.x, self.y + self.o, self.z)
+
+    def lane_y(self):
+        """Their lane, on the right of their way along x: -y going +x."""
+        return -self.u * self.off
 
     def aim(self, dog, room):
         """(speed, side step) wanted with the dog at `dog` (x, y, z), or None
@@ -126,6 +141,8 @@ class Walker:
         if x > self.hi or x < self.lo:              # the lane's end: turn round there
             x = min(max(x, self.lo), self.hi)
             self.u = -self.u
+        if self.keep_right:                         # over to the right of the way back
+            self.y = _toward(self.y, self.lane_y(), SIDE_V * dt)
         if dog is not None and DOG_FLOOR_Z[0] <= dog[2] - self.z < DOG_FLOOR_Z[1]:
             touch = RADIUS + DOG_R + MIN_GAP
             now = math.hypot(dog[0] - self.x, dog[1] - (self.y + self.o))
@@ -154,7 +171,8 @@ class Movers:
         self.mocap = [int(model.body(f"person_{k}").mocapid[0]) for k in range(MAX_PEOPLE)]
         self.body = [int(model.body(f"person_{k}").id) for k in range(MAX_PEOPLE)]
         self._geom = np.zeros(1, np.int32)
-        self.walkers = [Walker(*ROUTES[k], phase=0.37 * k) for k in range(n_people)]
+        self.walkers = [Walker(*ROUTES[k], phase=0.37 * k, keep_right=KEEP_RIGHT)
+                        for k in range(n_people)]
         self.emulator = emulator
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
