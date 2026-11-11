@@ -13,6 +13,7 @@ where the schedule says they are, not when Python got round to them.
 Impairments, all off by default: range noise, packet drop, and delay with
 jitter (which also reorders, as a real network can).
 """
+import errno
 import heapq
 import math
 import socket
@@ -78,23 +79,37 @@ class ImuNoise:
 
 
 class UdpOut:
-    """Sends from the sensor's own ports, as the real unit does."""
+    """Sends from the sensor's own ports, as the real unit does.
+
+    A failed send is counted, not raised (`failed`, by errno name): nobody
+    listening is no concern of a sensor's, but a full send buffer is packets
+    lost on this side, and it was silent. With the dense pattern in a full HIL
+    run, a burst of catching-up slices overflowed it and the board got frames
+    of a third of a sweep (HIL 11-11 14:51)."""
+
+    SNDBUF = 4 << 20                          # bytes: room for a few frames' bursts
 
     def __init__(self, host="127.0.0.1", bind="0.0.0.0"):
         self.host = host
         self.socks = {}
+        self.failed = {}
         for src, dst in ((mid360.POINT_PORT, mid360.POINT_HOST_PORT),
                          (mid360.IMU_PORT, mid360.IMU_HOST_PORT)):
             s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            try:
+                s.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, self.SNDBUF)
+            except OSError:
+                pass                          # the OS's own limit, then
             s.bind((bind, src))
             self.socks[dst] = s
 
     def __call__(self, data, port):
         try:
             self.socks[port].sendto(data, (self.host, port))
-        except OSError:
-            pass                              # nobody listening: a sensor does not care
+        except OSError as e:
+            name = errno.errorcode.get(e.errno, str(e.errno))
+            self.failed[name] = self.failed.get(name, 0) + 1
 
     def close(self):
         for s in self.socks.values():
@@ -121,6 +136,7 @@ class Emulator:
         self.buf = []                          # (xyz, refl) waiting to fill a packet
         self.late = []                         # (release, n, data, port): delayed packets
         self.sent = self.dropped = self.dropped_points = self.queued = 0
+        self.frames_sent = self.frames_skipped = self.slices_late = 0
 
     # -- what goes out ---------------------------------------------------------
 
@@ -182,6 +198,7 @@ class Emulator:
         self._packets(now, pad=last)
         self.slice += 1
         if last:
+            self.frames_sent += 1
             self.slice, self.udp_cnt = 0, 0
             self.frame_cnt = (self.frame_cnt + 1) & 0xFF
             self.frame_t += self.frame_s
@@ -201,6 +218,20 @@ class Emulator:
         """Do whatever is due. Returns the time of the next thing that will be."""
         now = (self.clock() if now is None else now) - self.t0
         while self.next_slice <= now:
+            if self.slice == 0 and now - self.next_slice >= self.frame_s:
+                # A whole frame or more behind as a new one is due: skip whole
+                # frames, as a sensor that missed them would (frame_cnt moves
+                # on), rather than cast them all now and send them in a burst.
+                # A frame already begun is finished, so whatever is sent is a
+                # whole sweep.
+                k = int((now - self.next_slice) // self.frame_s)
+                self.next_slice += k * self.frame_s
+                self.frame_t += k * self.frame_s
+                self.frame_cnt = (self.frame_cnt + k) & 0xFF
+                self.frames_skipped += k
+                continue
+            if now - self.next_slice > self.slice_s:
+                self.slices_late += 1
             self._do_slice(now)
             self.next_slice += self.slice_s
         while self.next_imu <= now:
@@ -209,6 +240,13 @@ class Emulator:
         self._release(now)
         nxt = min(self.next_slice, self.next_imu, self.late[0][0] if self.late else math.inf)
         return nxt + self.t0
+
+    def status(self):
+        """One line of how it is keeping up, for the log."""
+        failed = getattr(self.out, "failed", {})
+        return (f"mid360: {self.frames_sent} frames sent, {self.frames_skipped} skipped late, "
+                f"{self.slices_late} slices late, send errors "
+                + (", ".join(f"{k} {v}" for k, v in sorted(failed.items())) or "none"))
 
     def run(self, seconds=math.inf):
         end = self.clock() + seconds

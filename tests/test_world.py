@@ -217,3 +217,48 @@ def test_go2_stands_still_at_the_physics_step():
             xy0 = d.qpos[:2].copy()
     assert np.linalg.norm(d.qpos[:2] - xy0) < 0.01
     assert 0.30 < d.qpos[2] < 0.40
+
+
+# -- keeping up (lidar-pacing) ------------------------------------------------
+
+def test_behind_at_a_frame_start_whole_frames_are_skipped_not_burst(room):
+    # HIL 11-11 14:51 (dense): behind, it cast and sent every overdue slice at
+    # once, the send buffer overflowed, and the board got a third of a sweep.
+    out = Out()
+    emu = Emulator(Raycaster(room, "cyberdog"), StaticPose(), out, clock=lambda: 0.0)
+    for t in np.arange(0.0, 0.1, 0.001):                       # frame 0, on time
+        emu.step(t)
+    emu.step(0.35)                                             # then 250 ms late
+    for t in np.arange(0.351, 0.5, 0.001):
+        emu.step(t)
+    hs = [header(b) for b in out.points()]
+    per_frame = math.ceil(1980 / 96)
+    cnts = sorted({h["frame_cnt"] for h in hs})
+    assert emu.frames_skipped == 2 and cnts[:3] == [0, 3, 4]  # frames 1 and 2 never sent
+    for k in (0, 3, 4):                                       # the finished ones (5 has begun)
+        f = [h for h in hs if h["frame_cnt"] == k]
+        assert [h["udp_cnt"] for h in f] == list(range(per_frame))   # every frame sent is whole
+        assert f[0]["stamp"] == k * 100_000_000               # and on the sensor's own 100 ms grid
+
+
+def test_a_late_slice_in_a_frame_already_begun_is_counted_and_sent(room):
+    out = Out()
+    emu = Emulator(Raycaster(room, "cyberdog"), StaticPose(), out, clock=lambda: 0.0)
+    emu.step(0.0)
+    emu.step(0.05)                                             # slices 1-5 due, one tick late
+    assert emu.frames_skipped == 0 and emu.slices_late >= 3
+
+
+def test_udp_out_counts_what_it_could_not_send():
+    import errno
+    from go2_world.emulator import UdpOut
+
+    class Full:
+        def sendto(self, data, addr):
+            raise OSError(errno.ENOBUFS, "No buffer space available")
+
+    u = UdpOut.__new__(UdpOut)                                 # no real sockets for this
+    u.host, u.failed, u.socks = "127.0.0.1", {}, {56301: Full()}
+    u(b"x", 56301)
+    u(b"x", 56301)
+    assert u.failed == {"ENOBUFS": 2}
