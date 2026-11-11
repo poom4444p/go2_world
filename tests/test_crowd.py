@@ -221,3 +221,38 @@ def test_movers_put_standers_after_the_walkers():
     assert movers.state()["people"][2] == [3.0, 0.8, 0.0]
     with pytest.raises(ValueError):
         Movers(m, d, threading.Lock(), crowd.MAX_PEOPLE, standers=[crowd.Stander(0, 0)])
+
+
+def test_a_slow_walker_waits_parked_until_the_dog_comes_near():
+    w = crowd.SlowWalker(6.0, 0.5)
+    assert w.tick(DT, (-2.0, -0.6, DOG_Z), sim_dt=DT) == crowd.PARKED     # 8 m behind
+    assert w.tick(DT, (6.0, -0.6, DOG_Z + 2 * crowd.FLOOR_HEIGHT), sim_dt=DT) == crowd.PARKED  # floor 3
+    assert w.tick(DT, (6.0 - crowd.APPEAR_M + 0.5, -0.6, DOG_Z), sim_dt=DT) == (6.0, -0.6, 0.0)
+
+
+def test_a_slow_walker_walks_on_simulated_time_and_is_gone_at_its_end():
+    w = crowd.SlowWalker(6.0, 0.5, x1=8.0)
+    w.tick(DT, (2.0, -0.6, DOG_Z), sim_dt=0.0)                    # set off
+    for _ in range(100):                                         # 1 s of wall, 0.8 s simulated
+        p = w.tick(DT, None, sim_dt=0.8 * DT)
+    assert abs(p[0] - (6.0 + 0.5 * 0.8)) < 1e-9 and p[1] == -0.6
+    for _ in range(1000):
+        p = w.tick(DT, None, sim_dt=DT)
+    assert p == crowd.PARKED
+
+
+def test_a_slow_walker_never_steps_into_a_dog_cut_in_ahead():
+    w = crowd.SlowWalker(6.0, 0.5)
+    w.tick(DT, (2.0, -0.6, DOG_Z), sim_dt=0.0)
+    dog = (6.0 + crowd.RADIUS + crowd.DOG_R + crowd.MIN_GAP + 0.02, -0.6, DOG_Z)
+    for _ in range(100):
+        p = w.tick(DT, dog, sim_dt=DT)
+    assert math.hypot(dog[0] - p[0], dog[1] - p[1]) >= crowd.RADIUS + crowd.DOG_R + crowd.MIN_GAP
+
+
+def test_movers_put_slow_walkers_with_the_standers():
+    m = mujoco.MjModel.from_xml_string(WALLED.format(people=crowd.people_xml()))
+    d = mujoco.MjData(m)
+    w = crowd.SlowWalker(6.0, 0.5)
+    movers = Movers(m, d, threading.Lock(), 2, standers=[crowd.Stander(3.0, 0.8), w])
+    assert movers.state()["people"][3] == list(crowd.PARKED)

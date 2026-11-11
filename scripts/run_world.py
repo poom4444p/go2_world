@@ -9,6 +9,7 @@ and the LiDAR emulator cannot tell the two apart.
   python scripts/run_world.py --headless --spawn=24.0,0.0,0 en9    # the dog at the lift doors
   python scripts/run_world.py --headless --record=run.mp4 en9      # and a video of it (go2_world/recorder.py)
   python scripts/run_world.py --headless --stand=3.0,0.8 en9        # somebody standing in the trolley's north gap
+  python scripts/run_world.py --headless --walker=6.0,0.5 en9       # somebody slower walking ahead in the dog's lane
 
 --held-pd: unitree_mujoco's own motor model, the torque worked out once per
 LowCmd and held until the next. By default the PD runs every physics step
@@ -26,7 +27,8 @@ import threading
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from go2_world import _macos_timerfd  # noqa: E402,F401  (before unitree_sdk2py)
-from go2_world.crowd import MOVERS_PORT, Movers, Stander  # noqa: E402
+from go2_world.crowd import APPEAR_M as crowd_appear  # noqa: E402
+from go2_world.crowd import MOVERS_PORT, Movers, SlowWalker, Stander  # noqa: E402
 from go2_world.lift import LIFT_PORT, LiftServer  # noqa: E402
 from go2_world.scene import SIMULATE_DT, UNITREE_MUJOCO, write_scene  # noqa: E402
 
@@ -38,6 +40,9 @@ LIFT_LISTEN = "127.0.0.1"    # --lift-listen=IP: take lift calls there (the brai
 RECORD = None               # --record=PATH: the world to an MP4 while it runs
 STAND = []                   # --stand=X,Y[,SECONDS[,FLOOR]]: somebody standing still (crowd.Stander),
                              # for SECONDS of wall clock then gone (default: for good), floor 1
+WALK = []                    # --walker=X0,V[,X1[,Y[,FLOOR]]]: somebody walking from X0 to X1
+                             # (default 18) at V m/s of simulated time, along Y (default
+                             # -0.6, the right-hand lane going +x), floor 1 (crowd.SlowWalker)
 ARGS = []
 for a in sys.argv[1:]:
     if a in ("--headless", "--held-pd"):
@@ -54,6 +59,11 @@ for a in sys.argv[1:]:
     if a.startswith("--stand="):
         v = [float(p) for p in a.split("=", 1)[1].split(",")]
         STAND.append((v[0], v[1], int(v[3]) if len(v) > 3 else 1, v[2] if len(v) > 2 else None))
+        continue
+    if a.startswith("--walker="):
+        v = [float(p) for p in a.split("=", 1)[1].split(",")]
+        WALK.append((v[0], v[1], v[2] if len(v) > 2 else 18.0, v[3] if len(v) > 3 else -0.6,
+                     int(v[4]) if len(v) > 4 else 1))
         continue
     if a.startswith("--spawn="):
         SPAWN = tuple(float(v) for v in a.split("=", 1)[1].split(","))
@@ -123,11 +133,15 @@ lift = LiftServer(sim["mj_model"], sim["mj_data"], sim["locker"], host=LIFT_LIST
 print(f"lift: car at floor 1, call it on udp {LIFT_LISTEN}:{LIFT_PORT}", flush=True)
 # The people, and the moving parts' positions for the LiDAR emulator.
 Movers(sim["mj_model"], sim["mj_data"], sim["locker"], PEOPLE, lift=lift.lift,
-       standers=[Stander(x, y, floor, stay) for x, y, floor, stay in STAND]).start()
+       standers=[Stander(x, y, floor, stay) for x, y, floor, stay in STAND]
+       + [SlowWalker(x0, v, x1, y, floor) for x0, v, x1, y, floor in WALK]).start()
 print(f"world: {PEOPLE} people walking; movers to udp 127.0.0.1:{MOVERS_PORT}", flush=True)
 for x, y, floor, stay in STAND:
     print(f"world: somebody standing at ({x}, {y}) floor {floor}"
           f"{'' if stay is None else f' for {stay:.0f} s'}", flush=True)
+for x0, v, x1, y, floor in WALK:
+    print(f"world: somebody walking {x0} -> {x1} at {v} m/s along y {y}, floor {floor},"
+          f" setting off when the dog is {crowd_appear} m behind", flush=True)
 
 if RECORD:
     import signal

@@ -25,7 +25,7 @@ Mac                                                    J4012 (or the Mac)
 | `go2_world/pose.py` | The pose from DDS, or a dog standing still |
 | `go2_world/lift.py` | The lift car, moving: a mocap body the dog rides on contact, eased at 0.5 m/s², called to a floor over UDP 9880 (`{"call": 3}`) by whoever presses the button |
 | `go2_world/crowd.py` | People walking lanes of the corridors (`--people=N`, up to 6), on the right of their way as in Denmark (`KEEP_RIGHT`; turning round, they cross over): solid capsules the dog can bump, who make way for it (step aside, walk past slowly, or stop short and after 8 s turn back), their positions and the lift car's sent to the LiDAR emulator (UDP 9882) so the Mid-360 sees them |
-| `scripts/run_world.py` | The physics (mjpython, or `--headless` with plain python), with the lift running; `--people=N`, `--spawn=X,Y,YAW`, `--record=PATH` |
+| `scripts/run_world.py` | The physics (mjpython, or `--headless` with plain python), with the lift running; `--people=N`, `--spawn=X,Y,YAW`, `--record=PATH`, `--stand=X,Y[,S[,FLOOR]]` (somebody standing still), `--walker=X0,V[,X1[,Y[,FLOOR]]]` (somebody slower walking ahead in the dog's lane, on simulated time, setting off when the dog is 6 m behind: for the brain to follow or overtake) |
 | `go2_world/recorder.py` | `--record=PATH`: the world to an MP4 as it runs (15 fps, a camera chasing the dog, the lift car from the corridor while the dog rides it), each frame stamped with world time, floor and the dog's position |
 | `scripts/run_lidar.py` | The fake Mid-360 |
 | `scripts/run_sim.py` | The physics in unitree_mujoco's own go2 scene, no building (mjpython). Not flat: 8 cm bars at x = 1.2 and 1.6 m, stairs from 2.3 m, in front of the dog |

@@ -200,8 +200,54 @@ class Stander:
             return PARKED
         return (self.x, self.y, self.z)
 
-    def tick(self, dt, *_):
+    def tick(self, dt, *_, **__):
         self.t += dt
+        return self.pos()
+
+
+APPEAR_M = 6.0               # m behind a slow walker's start the dog is when they set off
+
+
+class SlowWalker:
+    """Somebody walking the dog's way ahead of it, slower than it, in its lane:
+    for the brain to follow or overtake (--walker). The crowd's walkers are
+    0.8-1.0 m/s, faster than the dog, and overtake it instead.
+
+    Parked until the dog, on their floor, is within APPEAR_M behind x0 (so
+    they set off ahead of it whenever it gets there); then along y from x0 to
+    x1 at v, and gone at x1. They do not make way -- people walking ahead do
+    not see the dog behind them -- but never step into it (MIN_GAP), should
+    it cut in front. On simulated time (sim_dt), not the wall clock the
+    crowd walks on: the physics runs ~0.83x real time, and a speed is set to
+    be slower than the dog by so much."""
+
+    def __init__(self, x0, v, x1=18.0, y=-0.6, floor=1):
+        self.x0, self.x1, self.y, self.v = x0, x1, y, v
+        self.z = (floor - 1) * FLOOR_HEIGHT
+        self.u = math.copysign(1.0, x1 - x0)
+        self.x, self.state = x0, "waiting"           # waiting -> walking -> gone
+
+    def pos(self):
+        return (self.x, self.y, self.z) if self.state == "walking" else PARKED
+
+    def tick(self, dt, dog=None, sim_dt=None):
+        """dt: wall seconds; sim_dt: simulated ones, used when given.
+        dog: its trunk (x, y, z) or None."""
+        here = dog is not None and DOG_FLOOR_Z[0] <= dog[2] - self.z < DOG_FLOOR_Z[1]
+        if self.state == "waiting":
+            if here and 0.0 < (self.x0 - dog[0]) * self.u < APPEAR_M:
+                self.state = "walking"
+            return self.pos()
+        if self.state == "walking":
+            x = self.x + self.u * self.v * (dt if sim_dt is None else sim_dt)
+            if here:
+                touch = RADIUS + DOG_R + MIN_GAP
+                now = math.hypot(dog[0] - self.x, dog[1] - self.y)
+                if math.hypot(dog[0] - x, dog[1] - self.y) < min(touch, now):
+                    x = self.x                       # a step would close on it: stand
+            self.x = x
+            if (self.x - self.x1) * self.u >= 0.0:
+                self.state = "gone"
         return self.pos()
 
 
@@ -219,7 +265,8 @@ class Movers:
         self._geom = np.zeros(1, np.int32)
         self.walkers = [Walker(*ROUTES[k], phase=0.37 * k, keep_right=KEEP_RIGHT)
                         for k in range(n_people)]
-        self.standers = list(standers)          # bodies after the walkers'
+        self.standers = list(standers)          # bodies after the walkers' (and
+                                                # slow walkers: anything with tick/pos)
         self.emulator = emulator
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
@@ -263,18 +310,23 @@ class Movers:
 
     def _run(self):
         last, sent = time.monotonic(), 0.0
+        last_sim = None
         while True:
             time.sleep(0.01)
             now = time.monotonic()
             dt, last = now - last, now
             with self.lock:
+                t_sim = float(self.data.time)
+                sim_dt = 0.0 if last_sim is None else max(0.0, t_sim - last_sim)
+                last_sim = t_sim
                 dog, dog_v = self.dog(), self.dog_v()
                 for k, w in enumerate(self.walkers):
                     self.data.mocap_pos[self.mocap[k]] = w.tick(
                         dt, dog, lambda side, k=k, w=w: self.room(k, w, side), dog_v,
                         lambda side, k=k, w=w: self.oncoming(k, w, side))
                 for j, s in enumerate(self.standers):
-                    self.data.mocap_pos[self.mocap[len(self.walkers) + j]] = s.tick(dt)
+                    self.data.mocap_pos[self.mocap[len(self.walkers) + j]] = s.tick(
+                        dt, dog, sim_dt=sim_dt)
             if now - sent >= 0.05:
                 sent = now
                 try:
