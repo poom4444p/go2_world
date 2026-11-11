@@ -17,6 +17,9 @@ from go2_world.raycast import Raycaster  # noqa: E402
 from go2_world.scene import BUILDING, movers_building  # noqa: E402
 
 
+STATUS_S = 10.0           # seconds between status lines in the log
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     ap.add_argument("--host", default="127.0.0.1", help="where the points go (the board)")
@@ -59,11 +62,14 @@ def main():
               + " ".join(f"{math.degrees(b):+.2f}" for b in imu.gyro_b))
     t = time.monotonic()
     try:
-        emu.run(a.seconds)
+        while time.monotonic() - t < a.seconds:          # a status line every STATUS_S
+            emu.run(min(STATUS_S, a.seconds - (time.monotonic() - t)))
+            print(emu.status(), flush=True)
     except KeyboardInterrupt:
         pass
     dt = time.monotonic() - t
     print(f"mid360: {emu.sent} packets in {dt:.1f} s, {emu.dropped} dropped on purpose")
+    print(emu.status())
 
 
 if __name__ == "__main__":
