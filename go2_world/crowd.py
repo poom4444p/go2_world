@@ -156,9 +156,14 @@ class Walker:
             return (min(self.speed, along) if near < WAIT_M + DOG_R else self.speed), o
         return (0.0 if near < WAIT_M + DOG_R else min(self.speed, PASS_V)), o
 
-    def tick(self, dt, dog=None, room=None, dog_v=None, oncoming=None):
-        """Walk dt seconds. dog: its trunk (x, y, z) or None; room, dog_v,
+    def tick(self, dt, dog=None, room=None, dog_v=None, oncoming=None, sim_dt=None):
+        """Walk dt seconds -- or sim_dt, simulated ones, when given: the
+        physics runs ~0.83x real time and the dog walks on it, so people on
+        the wall clock walked, sped up, stepped aside and gave up ~20 % quick
+        against it, and were judged against its qvel (simulated m/s) on the
+        wrong clock. dog: its trunk (x, y, z) or None; room, dog_v,
         oncoming: as in aim()."""
+        dt = dt if sim_dt is None else sim_dt
         want_v, want_o = self.aim(dog, room, dog_v, oncoming)
         self.v = _toward(self.v, want_v, ACCEL * dt)
         o = _toward(self.o, want_o, SIDE_V * dt)
@@ -217,9 +222,9 @@ class SlowWalker:
     they set off ahead of it whenever it gets there); then along y from x0 to
     x1 at v, and gone at x1. They do not make way -- people walking ahead do
     not see the dog behind them -- but never step into it (MIN_GAP), should
-    it cut in front. On simulated time (sim_dt), not the wall clock the
-    crowd walks on: the physics runs ~0.83x real time, and a speed is set to
-    be slower than the dog by so much."""
+    it cut in front. On simulated time (sim_dt), as the crowd: the physics
+    runs ~0.83x real time, and a speed is set to be slower than the dog by
+    so much."""
 
     def __init__(self, x0, v, x1=18.0, y=-0.6, floor=1):
         self.x0, self.x1, self.y, self.v = x0, x1, y, v
@@ -323,7 +328,7 @@ class Movers:
                 for k, w in enumerate(self.walkers):
                     self.data.mocap_pos[self.mocap[k]] = w.tick(
                         dt, dog, lambda side, k=k, w=w: self.room(k, w, side), dog_v,
-                        lambda side, k=k, w=w: self.oncoming(k, w, side))
+                        lambda side, k=k, w=w: self.oncoming(k, w, side), sim_dt=sim_dt)
                 for j, s in enumerate(self.standers):
                     self.data.mocap_pos[self.mocap[len(self.walkers) + j]] = s.tick(
                         dt, dog, sim_dt=sim_dt)

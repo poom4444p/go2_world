@@ -256,3 +256,22 @@ def test_movers_put_slow_walkers_with_the_standers():
     w = crowd.SlowWalker(6.0, 0.5)
     movers = Movers(m, d, threading.Lock(), 2, standers=[crowd.Stander(3.0, 0.8), w])
     assert movers.state()["people"][3] == list(crowd.PARKED)
+
+
+def test_walkers_walk_on_simulated_time_when_given():
+    # The physics runs ~0.83x real time and the dog walks on it: on the wall
+    # clock people were ~20 % quick against it (HANDOFF 11-10, item 3).
+    wall, sim = Walker(1, 0.7, 6.0, 16.0, 1.0), Walker(1, 0.7, 6.0, 16.0, 1.0)
+    for _ in range(300):                               # 3 s of wall clock, 2.49 s simulated
+        wall.tick(DT)
+        sim.tick(DT, sim_dt=0.83 * DT)
+    assert sim.x - 6.0 == pytest.approx(0.83 * (wall.x - 6.0), rel=0.02)
+
+
+def test_waiting_for_the_dog_is_counted_in_simulated_seconds():
+    dog = (10.0, 0.0, DOG_Z)
+    w = Walker(1, 0.0, 0.0, 16.0, 1.0, phase=8.4 / 32)  # in front of it, no room either side: stops
+    u = w.u
+    for _ in range(round(crowd.GIVE_UP_S / DT) + 300):  # GIVE_UP_S + 3 s of wall clock...
+        w.tick(DT, dog, room=lambda side: 0.0, sim_dt=0.5 * DT)
+    assert w.u == u and w.waited > 0.0                 # ...is not GIVE_UP_S simulated: still waiting
