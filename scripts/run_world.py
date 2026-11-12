@@ -22,6 +22,7 @@ stale-state guard to trip. Headless, the same runs stay under 20 ms.
 """
 import os
 import runpy
+import signal
 import sys
 import threading
 
@@ -132,9 +133,9 @@ if SPAWN is not None:
 lift = LiftServer(sim["mj_model"], sim["mj_data"], sim["locker"], host=LIFT_LISTEN).start()
 print(f"lift: car at floor 1, call it on udp {LIFT_LISTEN}:{LIFT_PORT}", flush=True)
 # The people, and the moving parts' positions for the LiDAR emulator.
-Movers(sim["mj_model"], sim["mj_data"], sim["locker"], PEOPLE, lift=lift.lift,
-       standers=[Stander(x, y, floor, stay) for x, y, floor, stay in STAND]
-       + [SlowWalker(x0, v, x1, y, floor) for x0, v, x1, y, floor in WALK]).start()
+movers = Movers(sim["mj_model"], sim["mj_data"], sim["locker"], PEOPLE, lift=lift.lift,
+                standers=[Stander(x, y, floor, stay) for x, y, floor, stay in STAND]
+                + [SlowWalker(x0, v, x1, y, floor) for x0, v, x1, y, floor in WALK]).start()
 print(f"world: {PEOPLE} people walking; movers to udp 127.0.0.1:{MOVERS_PORT}", flush=True)
 for x, y, floor, stay in STAND:
     print(f"world: somebody standing at ({x}, {y}) floor {floor}"
@@ -143,21 +144,26 @@ for x0, v, x1, y, floor in WALK:
     print(f"world: somebody walking {x0} -> {x1} at {v} m/s along y {y}, floor {floor},"
           f" setting off when the dog is {crowd_appear} m behind", flush=True)
 
+rec = None
 if RECORD:
-    import signal
-
     from go2_world.recorder import Recorder
     rec = Recorder(sim["mj_model"], sim["mj_data"], sim["locker"], RECORD).start()
-
-    def _finish(signum, frame):
-        # Stopped with pkill (SIGTERM) or Ctrl-C: finish the file, then go, as
-        # the signal would have. The sim's threads are not daemons, so exit hard.
-        rec.close()
-        os._exit(128 + signum)
-
-    signal.signal(signal.SIGTERM, _finish)
-    signal.signal(signal.SIGINT, _finish)
     print(f"recorder: {RECORD}", flush=True)
+
+
+def _finish(signum, frame):
+    # Stopped with pkill (SIGTERM) or Ctrl-C: the run's truth (go2_world/score.py)
+    # into the log, finish the video if one is being made, then go, as the
+    # signal would have. The sim's threads are not daemons, so exit hard.
+    for line in movers.score.summary():
+        print(line, flush=True)
+    if rec is not None:
+        rec.close()
+    os._exit(128 + signum)
+
+
+signal.signal(signal.SIGTERM, _finish)
+signal.signal(signal.SIGINT, _finish)
 
 # mjpython closes the viewer when this script returns: wait for the sim's threads.
 for t in threading.enumerate():

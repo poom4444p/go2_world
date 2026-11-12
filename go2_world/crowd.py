@@ -258,7 +258,8 @@ class SlowWalker:
 
 class Movers:
     """Walks the people in the physics and tells the emulator where they and
-    the lift car are, 20 times a second."""
+    the lift car are, 20 times a second; scores the run's truth as it goes
+    (.score, go2_world/score.py)."""
 
     def __init__(self, model, data, lock, n_people, lift=None, emulator=("127.0.0.1", MOVERS_PORT),
                  standers=()):
@@ -274,6 +275,8 @@ class Movers:
                                                 # slow walkers: anything with tick/pos)
         self.emulator = emulator
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        from go2_world.score import Score
+        self.score = Score(model, log=lambda line: print(line, flush=True))
 
     def start(self):
         threading.Thread(target=self._run, daemon=True).start()
@@ -324,6 +327,8 @@ class Movers:
                 t_sim = float(self.data.time)
                 sim_dt = 0.0 if last_sim is None else max(0.0, t_sim - last_sim)
                 last_sim = t_sim
+                # The truth first, on the physics as it stands (go2_world/score.py).
+                self.score.tick(self.data, sim_dt, [self.data.mocap_pos[m] for m in self.mocap])
                 dog, dog_v = self.dog(), self.dog_v()
                 for k, w in enumerate(self.walkers):
                     self.data.mocap_pos[self.mocap[k]] = w.tick(
