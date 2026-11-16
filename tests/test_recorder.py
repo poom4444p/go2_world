@@ -1,7 +1,10 @@
 import math
 
-from go2_world.recorder import (CHASE_D, CHASE_EL, LIFT_CAM, MIN_D, WALL_GAP, back_dir, camera_for,
-                                 ease_angle, floor_of, pulled_in, yaw_of)
+import mujoco
+
+from go2_world.lift import floor_z
+from go2_world.recorder import (CHASE_D, CHASE_EL, LIFT_CAM, MIN_D, WALL_GAP, add_puddles, back_dir,
+                                 camera_for, ease_angle, floor_of, pulled_in, yaw_of)
 
 
 def test_floor_of_trunk_heights():
@@ -45,3 +48,24 @@ def test_pulled_in_front_of_a_wall():
     assert pulled_in(CHASE_D, 10.0) == CHASE_D             # wall beyond the camera
     assert abs(pulled_in(CHASE_D, 2.0) - (2.0 - WALL_GAP)) < 1e-9
     assert pulled_in(CHASE_D, 0.5) == MIN_D                # never closer than this
+
+
+def test_puddles_are_drawn_on_their_floor_and_not_in_the_model():
+    model = mujoco.MjModel.from_xml_string(
+        "<mujoco><worldbody><geom type='plane' size='5 5 0.1'/></worldbody></mujoco>")
+    data = mujoco.MjData(model)
+    scn = mujoco.MjvScene(model, maxgeom=10)
+    mujoco.mjv_updateScene(model, data, mujoco.MjvOption(), None, mujoco.MjvCamera(),
+                           mujoco.mjtCatBit.mjCAT_ALL, scn)
+    before = scn.ngeom
+    assert add_puddles(scn, [(1.0, 2.0, 0.4, 1), (3.0, -1.0, 0.3, 3)]) == 2
+    assert scn.ngeom == before + 2
+    g = scn.geoms[before + 1]
+    assert abs(g.pos[2] - (floor_z(3) + 0.004)) < 1e-6 and abs(g.size[0] - 0.3) < 1e-6
+    assert model.ngeom == 1                         # nothing the physics or a ray could hit
+
+
+def test_puddles_stop_when_the_scene_is_full():
+    model = mujoco.MjModel.from_xml_string("<mujoco><worldbody/></mujoco>")
+    scn = mujoco.MjvScene(model, maxgeom=1)
+    assert add_puddles(scn, [(0.0, 0.0, 0.4, 1)] * 3) == 1

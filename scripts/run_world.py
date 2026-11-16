@@ -10,6 +10,7 @@ and the LiDAR emulator cannot tell the two apart.
   python scripts/run_world.py --headless --record=run.mp4 en9      # and a video of it (go2_world/recorder.py)
   python scripts/run_world.py --headless --stand=3.0,0.8 en9        # somebody standing in the trolley's north gap
   python scripts/run_world.py --headless --walker=6.0,0.5 en9       # somebody slower walking ahead in the dog's lane
+  python scripts/run_world.py --headless --record=run.mp4 --puddle=9.5,-0.6,0.34 en9   # a puddle drawn in the video
 
 --held-pd: unitree_mujoco's own motor model, the torque worked out once per
 LowCmd and held until the next. By default the PD runs every physics step
@@ -44,6 +45,8 @@ STAND = []                   # --stand=X,Y[,SECONDS[,FLOOR]]: somebody standing 
 WALK = []                    # --walker=X0,V[,X1[,Y[,FLOOR]]]: somebody walking from X0 to X1
                              # (default 18) at V m/s of simulated time, along Y (default
                              # -0.6, the right-hand lane going +x), floor 1 (crowd.SlowWalker)
+PUDDLES = []                 # --puddle=X,Y,R[,FLOOR]: a puddle, drawn in --record's video only
+                             # (no physics, no LiDAR: recorder.add_puddles), floor 1
 ARGS = []
 for a in sys.argv[1:]:
     if a in ("--headless", "--held-pd"):
@@ -65,6 +68,10 @@ for a in sys.argv[1:]:
         v = [float(p) for p in a.split("=", 1)[1].split(",")]
         WALK.append((v[0], v[1], v[2] if len(v) > 2 else 18.0, v[3] if len(v) > 3 else -0.6,
                      int(v[4]) if len(v) > 4 else 1))
+        continue
+    if a.startswith("--puddle="):
+        v = [float(p) for p in a.split("=", 1)[1].split(",")]
+        PUDDLES.append((v[0], v[1], v[2], int(v[3]) if len(v) > 3 else 1))
         continue
     if a.startswith("--spawn="):
         SPAWN = tuple(float(v) for v in a.split("=", 1)[1].split(","))
@@ -147,8 +154,8 @@ for x0, v, x1, y, floor in WALK:
 rec = None
 if RECORD:
     from go2_world.recorder import Recorder
-    rec = Recorder(sim["mj_model"], sim["mj_data"], sim["locker"], RECORD).start()
-    print(f"recorder: {RECORD}", flush=True)
+    rec = Recorder(sim["mj_model"], sim["mj_data"], sim["locker"], RECORD, puddles=PUDDLES).start()
+    print(f"recorder: {RECORD}" + (f", {len(PUDDLES)} puddle(s) drawn" if PUDDLES else ""), flush=True)
 
 
 def _finish(signum, frame):
