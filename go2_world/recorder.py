@@ -9,7 +9,12 @@ from the corridor while the dog is in it: chasing from behind there puts the
 camera inside the shaft wall.
 
 Each frame is stamped with the world's time and the dog's position, to set
-against a brain log. The MP4 is fragmented, so a run that is killed still
+against a brain log.
+
+Puddles (`--puddle=`, run_world.py) are drawn as thin blue discs on the floor.
+They are in the renderer's scene only, never in the model: no physics and no
+LiDAR ray sees them -- a flat puddle is what the LiDAR cannot see, and the
+brain's (simulated) floor guard is what finds them. The MP4 is fragmented, so a run that is killed still
 leaves a file that plays; `close()` finishes it properly.
 
 Needs imageio[ffmpeg] and Pillow (`pip install -e .[record]`).
@@ -30,6 +35,24 @@ LIFT_CAM = (0.0, 3.4, -6.0)      # azimuth, distance, elevation: from the corrid
 IN_CAR_M = 1.0                   # the dog's trunk this near the car's centre (xy): in the lift
 AZ_SMOOTH = 0.15                 # per frame: the trunk yaws with every step; the camera should not
 WALL_GAP, MIN_D = 0.25, 0.8      # m: a camera that would be in a wall comes in front of it, this near at most
+
+
+PUDDLE_RGBA = np.array([0.15, 0.55, 1.0, 0.85], dtype=np.float32)
+
+
+def add_puddles(scn, puddles):
+    """Thin discs into a rendered scene, one per (x, y, r, floor), world frame.
+    Returns how many fitted (the scene has room for maxgeom)."""
+    n = 0
+    for x, y, r, floor in puddles:
+        if scn.ngeom >= scn.maxgeom:
+            break
+        mujoco.mjv_initGeom(scn.geoms[scn.ngeom], mujoco.mjtGeom.mjGEOM_CYLINDER,
+                            np.array([r, 0.003, 0.0]), np.array([x, y, floor_z(floor) + 0.004]),
+                            np.eye(3).flatten(), PUDDLE_RGBA)
+        scn.ngeom += 1
+        n += 1
+    return n
 
 
 def floor_of(z):
@@ -78,8 +101,9 @@ def camera_for(dog_xyz, yaw, car_xy, prev_az):
 
 
 class Recorder:
-    def __init__(self, model, data, lock, path, fps=FPS):
+    def __init__(self, model, data, lock, path, fps=FPS, puddles=()):
         self.model, self.live, self.lock = model, data, lock
+        self.puddles = list(puddles)
         self.path, self.fps = path, fps
         self.data = mujoco.MjData(model)            # the copy that is rendered
         self.trunk = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, "base_link")
@@ -161,6 +185,7 @@ class Recorder:
                 cam.lookat[:] = lookat
                 cam.azimuth, cam.distance, cam.elevation = az_now, dist, el
                 renderer.update_scene(self.data, cam)
+                add_puddles(renderer.scene, self.puddles)
                 writer.append_data(self._stamp(renderer.render(), dog, in_lift))
                 self.frames += 1
         finally:
