@@ -16,7 +16,9 @@ went on that). So a person who sees the dog ahead (NOTICE_M, same floor,
 near their line) steps away from it (up to SIDE_M, as far as the room on
 that side allows), and walks past slowly if that leaves PASS_SEP between
 them; else stops short and waits, and after GIVE_UP_S turns back. Never
-closer than MIN_GAP to the dog, and back to the lane once past it. Speed
+closer than MIN_GAP to the dog, and back to the lane once past it. "The
+dog" is the party when its heading is known: the dog and the person on its
+handle, HANDLER_BEHIND behind it -- people make room for both. Speed
 and the side step change at ACCEL and SIDE_V: nobody jumps.
 
 And they keep to the right of the corridor (KEEP_RIGHT), as people in Denmark
@@ -71,14 +73,26 @@ DOG_FLOOR_Z = (0.0, 1.5)     # trunk height above a person's floor that is "this
 NOTICE_M = 4.0               # m ahead along the lane at which the dog is seen
 NOTICE_LAT = 1.6             # m either side of the person: the corridor, roughly
 BEHIND_M = 0.5               # m behind them: passed, back to the lane
-SIDE_M = 0.45                # m, the most a person steps aside
+SIDE_M = 0.90                # m, the most a person steps aside (as the twin's SIDESTEP)
 SIDE_V = 0.4                 # m/s sideways
 WALL_KEEP = 0.10             # m kept from whatever is on that side
 ROOM_H = (0.5, 1.0)          # m above their floor the room aside is looked for at
-PASS_SEP = RADIUS + DOG_R + 0.25   # m across, centre to centre, to walk past the dog
+# How much room. People give a guide dog and its user what room the
+# corridor has -- up to SIDE_M aside -- and never less than MIN_GAP. They
+# stepped aside 0.45 m at most, passed at 0.25 m, closed to 0.10 m, and on
+# the dog alone, its user not there at all: they walked along beside the
+# user and pressed in on the dog, and the dog stood for them 16-23 s at a
+# time (HIL PEOPLE=6, 11-17). Insisting on 0.5 m always is not a corridor
+# either: in 2.8 m with the dog in the middle nobody could pass at all.
+MIN_GAP = 0.30               # m, surface to surface: never nearer the party than this
+PASS_SEP = RADIUS + DOG_R + MIN_GAP   # m across, centre to centre, to walk past the party
 PASS_V = 0.4                 # m/s walking past it
 WAIT_M = 1.2                 # m, centre to centre, at which one who cannot pass stops
-MIN_GAP = 0.10               # m, surface to surface: never nearer the dog than this
+# The party is the dog and the person on its handle, on one line: the user's
+# centre HANDLER_BEHIND behind the dog's (cyberdog run_building.HANDLER_BEHIND).
+# Given the dog's heading, people keep their room from the nearest point of
+# that line, not from the dog alone.
+HANDLER_BEHIND = 1.1         # m
 ACCEL = 0.8                  # m/s^2, speeding up and slowing down
 SAME_WAY_V = 0.2             # m/s of the dog along their way: it is going their way.
                              # Then they overtake it at their own pace, as people do,
@@ -91,11 +105,26 @@ ONCOMING_M = 6.0             # m ahead in the other half with somebody coming: n
                              # stepping out to overtake, follow instead
 OVERTAKE_SIDE_M = 1.0        # m stepped out to overtake: over into the other half
 OVERTAKE_TIE = 0.3           # m: a dog this near their line is passed on their left
-GIVE_UP_S = 8.0              # s stopped for the dog before turning back
+GIVE_UP_S = 3.0              # s stopped for the dog before turning back: a person
+                             # who cannot get past goes another way soon, rather than
+                             # stand there while the dog stands for them (8 s was a
+                             # stand-off, the dog asking "Excuse me" at them, HIL 11-17)
 
 
 def _toward(a, b, step):
     return b if abs(b - a) <= step else a + math.copysign(step, b - a)
+
+
+def party_point(dog, yaw, x, y):
+    """The point of the party -- the dog, and its user HANDLER_BEHIND behind it
+    -- nearest (x, y), as (x, y, z) with the dog's z. Without a heading
+    (yaw None) the dog alone."""
+    if dog is None or yaw is None:
+        return dog
+    bx, by = -math.cos(yaw), -math.sin(yaw)               # the way to the user
+    s = (x - dog[0]) * bx + (y - dog[1]) * by
+    s = min(max(s, 0.0), HANDLER_BEHIND)
+    return (dog[0] + bx * s, dog[1] + by * s, dog[2])
 
 
 class Walker:
@@ -156,14 +185,17 @@ class Walker:
             return (min(self.speed, along) if near < WAIT_M + DOG_R else self.speed), o
         return (0.0 if near < WAIT_M + DOG_R else min(self.speed, PASS_V)), o
 
-    def tick(self, dt, dog=None, room=None, dog_v=None, oncoming=None, sim_dt=None):
+    def tick(self, dt, dog=None, room=None, dog_v=None, oncoming=None, sim_dt=None,
+             dog_yaw=None):
         """Walk dt seconds -- or sim_dt, simulated ones, when given: the
         physics runs ~0.83x real time and the dog walks on it, so people on
         the wall clock walked, sped up, stepped aside and gave up ~20 % quick
         against it, and were judged against its qvel (simulated m/s) on the
         wrong clock. dog: its trunk (x, y, z) or None; room, dog_v,
-        oncoming: as in aim()."""
+        oncoming: as in aim(). dog_yaw: its heading, for the party (see
+        HANDLER_BEHIND); None, the dog alone."""
         dt = dt if sim_dt is None else sim_dt
+        dog = party_point(dog, dog_yaw, self.x, self.y + self.o)
         want_v, want_o = self.aim(dog, room, dog_v, oncoming)
         self.v = _toward(self.v, want_v, ACCEL * dt)
         o = _toward(self.o, want_o, SIDE_V * dt)
@@ -294,6 +326,11 @@ class Movers:
         """Its (vx, vy), world frame, m/s: the free joint's linear velocity."""
         return tuple(float(v) for v in self.data.qvel[0:2])
 
+    def dog_yaw(self):
+        """Its heading, rad: from the free joint's quaternion (w, x, y, z)."""
+        w, x, y, z = (float(v) for v in self.data.qpos[3:7])
+        return math.atan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z))
+
     def room(self, k, w, side):
         """Metres free from walker k's lane sideways (+1: +y), at ROOM_H:
         walls, the trolley, the dog and other people all count."""
@@ -329,11 +366,12 @@ class Movers:
                 last_sim = t_sim
                 # The truth first, on the physics as it stands (go2_world/score.py).
                 self.score.tick(self.data, sim_dt, [self.data.mocap_pos[m] for m in self.mocap])
-                dog, dog_v = self.dog(), self.dog_v()
+                dog, dog_v, yaw = self.dog(), self.dog_v(), self.dog_yaw()
                 for k, w in enumerate(self.walkers):
                     self.data.mocap_pos[self.mocap[k]] = w.tick(
                         dt, dog, lambda side, k=k, w=w: self.room(k, w, side), dog_v,
-                        lambda side, k=k, w=w: self.oncoming(k, w, side), sim_dt=sim_dt)
+                        lambda side, k=k, w=w: self.oncoming(k, w, side), sim_dt=sim_dt,
+                        dog_yaw=yaw)
                 for j, s in enumerate(self.standers):
                     self.data.mocap_pos[self.mocap[len(self.walkers) + j]] = s.tick(
                         dt, dog, sim_dt=sim_dt)
