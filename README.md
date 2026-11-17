@@ -16,7 +16,7 @@ Mac                                                    J4012 (or the Mac)
 | File | What |
 |---|---|
 | `assets/building.xml` | Cyberdog's building, frozen: static geoms, shifted so the Go2's start is a free spot in the floor 1 corridor |
-| `tools/export_building.py` | Makes `assets/building.xml` from Cyberdog's scene cache, once (reads Cyberdog, never writes it) |
+| `tools/export_building.py` | Makes `assets/building.xml` from Cyberdog's scene cache (`../cyberdog_jetson/output/scene_cache/building.xml`, or `CYBERDOG=`), once (reads Cyberdog, never writes it) |
 | `go2_world/scene.py` | unitree_mujoco's Go2 + the building, written to `build/scene.xml` at run time |
 | `go2_world/mid360.py` | The sensor: ports, rates, FOV, ray patterns, the mount on the trunk |
 | `go2_world/raycast.py` | Rays into the building at a trunk pose; points in the sensor frame, (0, 0, 0) for no return |
