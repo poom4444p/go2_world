@@ -1,7 +1,9 @@
 """Export Cyberdog's building into go2_world, once: assets/building.xml.
 
-Cyberdog builds its scene from the planner's occupancy grids at run time and
-caches it in output/scene_cache/building.xml. go2_world takes a frozen copy of
+Cyberdog (the cyberdog_jetson repo, next to this one; CYBERDOG= to point
+elsewhere) builds its scene from the planner's occupancy grids and caches it
+in output/scene_cache/building.xml (python -m cyberdog.sim.scene.build_scene
+--building). go2_world takes a frozen copy of
 that cache, so the world the dog walks in does not change under it when the
 brain repo does. Run this again only to take a newer building on purpose.
 
@@ -21,8 +23,10 @@ import os
 import sys
 import xml.etree.ElementTree as ET
 
-SRC = os.path.expanduser("~/Documents/Cyberdog/output/scene_cache/building.xml")
-OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "assets", "building.xml")
+HERE = os.path.dirname(os.path.abspath(__file__))
+CYBERDOG = os.environ.get("CYBERDOG") or os.path.join(HERE, "..", "..", "cyberdog_jetson")
+SRC = os.path.normpath(os.path.join(CYBERDOG, "output", "scene_cache", "building.xml"))
+OUT = os.path.join(HERE, "..", "assets", "building.xml")
 SPAWN = (21.0, 9.5, 0.0)          # floor 1 corridor, 2.4 m short of the trolley
 CLEAR = 0.5                       # nothing solid this close to the spawn point
 
