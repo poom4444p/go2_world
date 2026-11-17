@@ -40,11 +40,12 @@ def test_steps_away_from_the_dog_and_walks_past_slowly():
     path = walk(w, 12.0, dog, room=lambda side: 0.9)  # 0.9 m free either way
     alongside = [p for p in path if abs(p[0] - dog[0]) < 0.3]
     assert alongside, "it never got past the dog"
-    assert min(p[1] for p in alongside) >= 0.5 + crowd.SIDE_M - 1e-6     # stepped away (+y)
+    aside = min(crowd.SIDE_M, 0.9 - RADIUS - crowd.WALL_KEEP)          # as far as the room allows
+    assert min(p[1] for p in alongside) >= 0.5 + aside - 1e-6           # stepped away (+y)
     assert all(gap(p, dog) >= MIN_GAP - 1e-6 for p in path)
     speeds = [abs(b[0] - a[0]) / DT for a, b in zip(path, path[1:]) if abs(a[0] - dog[0]) < 0.3]
     assert max(speeds) <= crowd.PASS_V + 1e-6
-    assert path[-1][1] == pytest.approx(0.5)          # past it: back on the lane
+    assert path[-1][1] == pytest.approx(0.5, abs=0.1)  # past it: back to the lane (SIDE_V)
 
 
 def test_the_side_step_is_only_as_far_as_the_room():
@@ -275,3 +276,70 @@ def test_waiting_for_the_dog_is_counted_in_simulated_seconds():
     for _ in range(round(crowd.GIVE_UP_S / DT) + 300):  # GIVE_UP_S + 3 s of wall clock...
         w.tick(DT, dog, room=lambda side: 0.0, sim_dt=0.5 * DT)
     assert w.u == u and w.waited > 0.0                 # ...is not GIVE_UP_S simulated: still waiting
+
+
+def test_the_user_behind_the_dog_is_given_room_too():
+    # The dog at x 10 facing +x; its user 1.1 m behind it at x 8.9. Somebody
+    # coming the other way along the dog's line has to keep MIN_GAP from the
+    # user as well, not only from the dog.
+    dog, yaw = (10.0, 0.0, DOG_Z), 0.0
+    user = (dog[0] - crowd.HANDLER_BEHIND, 0.0)
+    w = Walker(1, 0.3, 14.0, 4.0, 1.0)
+    path = [w.tick(DT, dog, lambda side: 0.9, None, dog_yaw=yaw) for _ in range(1500)]
+    assert min(p[0] for p in path) < user[0] - 0.5, "it never got past the user"
+    assert all(gap(p, user) >= MIN_GAP - 1e-6 for p in path)
+    assert all(gap(p, dog) >= MIN_GAP - 1e-6 for p in path)
+
+
+def test_party_point_is_the_nearest_point_between_dog_and_user():
+    dog = (10.0, 0.0, DOG_Z)
+    assert crowd.party_point(dog, None, 0.0, 0.0) == dog
+    assert crowd.party_point(dog, 0.0, 12.0, 1.0)[:2] == pytest.approx((10.0, 0.0))
+    assert crowd.party_point(dog, 0.0, 9.5, 1.0)[:2] == pytest.approx((9.5, 0.0))
+    assert crowd.party_point(dog, 0.0, 5.0, 1.0)[:2] == pytest.approx((10.0 - crowd.HANDLER_BEHIND, 0.0))
+
+
+def box_wall(boxes, half=1.4):
+    """wall() for a corridor along x, walls at y = +-half, and axis-aligned
+    boxes (x0, x1, y0, y1): metres free from (x, y) towards (dx, dy)."""
+    def free(x, y, dx, dy):
+        best = math.inf
+        if dy > 0:
+            best = half - y
+        elif dy < 0:
+            best = y + half
+        for x0, x1, y0, y1 in boxes:
+            if dx and y0 <= y <= y1:
+                t = (x0 - x) / dx if dx > 0 else (x1 - x) / dx
+                if t >= 0:
+                    best = min(best, t)
+            if dy and x0 <= x <= x1:
+                t = (y0 - y) / dy if dy > 0 else (y1 - y) / dy
+                if t >= 0:
+                    best = min(best, t)
+        return best
+    return free
+
+
+def into_box(p, box):
+    x0, x1, y0, y1 = box
+    cx, cy = min(max(p[0], x0), x1), min(max(p[1], y0), y1)
+    return crowd.RADIUS - math.hypot(p[0] - cx, p[1] - cy)
+
+
+def test_a_crate_in_the_lane_is_gone_round_not_through():
+    box = (10.0, 10.6, -0.55, 0.05)                    # the floor-3 cartons, across the lane
+    w = Walker(1, -0.6, 6.0, 16.0, 1.0)                # walking +x at y -0.6
+    wall = box_wall([box])
+    path = [w.tick(DT, wall=wall) for _ in range(1500)]
+    assert max(p[0] for p in path) > 11.5, "it never got past the crate"
+    assert max(into_box(p, box) for p in path) <= 1e-6
+    assert all(abs(p[1]) <= 1.4 - crowd.RADIUS + 1e-6 for p in path)
+
+
+def test_never_steps_aside_into_a_wall():
+    dog = (10.0, 0.5, DOG_Z)                           # pushes them towards the +y wall
+    w = Walker(1, 0.7, 6.0, 16.0, 1.0)
+    wall = box_wall([])
+    path = [w.tick(DT, dog, lambda side: 3.0, wall=wall) for _ in range(1200)]   # room says plenty
+    assert all(p[1] <= 1.4 - crowd.RADIUS + 1e-6 for p in path)
