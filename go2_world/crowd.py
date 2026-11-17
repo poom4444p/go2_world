@@ -111,6 +111,17 @@ GIVE_UP_S = 3.0              # s stopped for the dog before turning back: a pers
                              # stand-off, the dog asking "Excuse me" at them, HIL 11-17)
 
 
+# Walls and crates. People only ever looked sideways, at the dog: they walked
+# straight through the floor-3 cartons (the lane at y -0.6 crosses them), and
+# stepping aside by a doorway, where the room reads as the whole room beyond,
+# they walked on into the wall past it (HIL 11-17, and on main before it: a
+# capsule up to 0.22 m into a wall in a headless run). So, given `wall` -- the
+# metres free from a point in a direction, among walls and crates only:
+BOX_LEAD = 1.2               # m ahead at which something static in their way is gone round
+WALL_H = 0.5                 # m above their floor the walls and crates are looked for at
+ROOM_AHEAD = (0.0, 0.6, 1.2)  # m along their way at which the room aside is measured
+
+
 def _toward(a, b, step):
     return b if abs(b - a) <= step else a + math.copysign(step, b - a)
 
@@ -147,6 +158,8 @@ class Walker:
         self.v = speed               # m/s along the lane, now
         self.o = 0.0                 # m stepped aside from the lane, now
         self.waited = 0.0            # s stopped for the dog
+        self.round_side = None       # the side a crate ahead is being gone round on
+        self.round_front = None      # ...and the x of its near face
 
     def pos(self):
         return (self.x, self.y + self.o, self.z)
@@ -186,17 +199,47 @@ class Walker:
         return (0.0 if near < WAIT_M + DOG_R else min(self.speed, PASS_V)), o
 
     def tick(self, dt, dog=None, room=None, dog_v=None, oncoming=None, sim_dt=None,
-             dog_yaw=None):
+             dog_yaw=None, wall=None):
         """Walk dt seconds -- or sim_dt, simulated ones, when given: the
         physics runs ~0.83x real time and the dog walks on it, so people on
         the wall clock walked, sped up, stepped aside and gave up ~20 % quick
         against it, and were judged against its qvel (simulated m/s) on the
         wrong clock. dog: its trunk (x, y, z) or None; room, dog_v,
         oncoming: as in aim(). dog_yaw: its heading, for the party (see
-        HANDLER_BEHIND); None, the dog alone."""
+        HANDLER_BEHIND); None, the dog alone. wall(x, y, dx, dy): metres free
+        from (x, y) that way among walls and crates (see BOX_LEAD); None,
+        none looked for."""
         dt = dt if sim_dt is None else sim_dt
         dog = party_point(dog, dog_yaw, self.x, self.y + self.o)
         want_v, want_o = self.aim(dog, room, dog_v, oncoming)
+        y0, o0 = self.y, self.o
+        stepping_round = False
+        if wall is not None:
+            # A crate in their way, shoulder to shoulder: round it, stepping
+            # over on one side (the roomier, then kept) until clear of it, at
+            # PASS_V, standing short of it while they cannot yet get by.
+            here = self.y + self.o
+            ahead = min(wall(self.x, here + s * RADIUS, self.u, 0.0) for s in (-1.0, 0.0, 1.0))
+            if ahead < BOX_LEAD:
+                self.round_front = self.x + self.u * ahead   # where its near face is
+                if self.round_side is None:
+                    rooms = {s: wall(self.x, here, 0.0, s) for s in (-1.0, 1.0)}
+                    self.round_side = max(rooms, key=rooms.get)
+                s = self.round_side
+                step = min(0.3, wall(self.x, here, 0.0, s) - RADIUS - WALL_KEEP)
+                if step > 0.0:
+                    want_o, stepping_round = self.o + s * step, True
+                    want_v = min(want_v, PASS_V)
+                if ahead < RADIUS + WALL_KEEP + 0.05:
+                    want_v = 0.0
+            elif (self.round_front is not None
+                  and (self.x - self.round_front) * self.u < RADIUS + WALL_KEEP):
+                # Clear of it only just: hold the side step until level with
+                # it -- back to the lane now walks straight back into it. Past
+                # its face, the guard below keeps them off its side.
+                want_o, stepping_round = self.o, True
+            else:
+                self.round_side = self.round_front = None
         self.v = _toward(self.v, want_v, ACCEL * dt)
         o = _toward(self.o, want_o, SIDE_V * dt)
         x = self.x + self.u * self.v * dt
@@ -205,6 +248,16 @@ class Walker:
             self.u = -self.u
         if self.keep_right:                         # over to the right of the way back
             self.y = _toward(self.y, self.lane_y(), SIDE_V * dt)
+        if wall is not None:
+            # Never into a wall or a crate: not sideways, and not along.
+            dy = (self.y + o) - (y0 + o0)
+            if dy and min(wall(self.x + s * RADIUS, y0 + o0, 0.0, math.copysign(1.0, dy))
+                          for s in (-1.0, 0.0, 1.0)) < RADIUS + abs(dy):
+                self.y, o = y0, o0                  # (front and back too: a crate's corner)
+            dx = x - self.x
+            if dx and min(wall(self.x, self.y + o + s * RADIUS, math.copysign(1.0, dx), 0.0)
+                          for s in (-1.0, 0.0, 1.0)) < RADIUS + abs(dx):
+                x, self.v = self.x, 0.0
         if dog is not None and DOG_FLOOR_Z[0] <= dog[2] - self.z < DOG_FLOOR_Z[1]:
             touch = RADIUS + DOG_R + MIN_GAP
             now = math.hypot(dog[0] - self.x, dog[1] - (self.y + self.o))
@@ -213,7 +266,7 @@ class Walker:
             if math.hypot(dog[0] - x, dog[1] - (self.y + o)) < min(touch, now):
                 o = self.o                          # so would the step aside
         self.x, self.o = x, o
-        if want_v == 0.0 and self.v < 0.05:
+        if want_v == 0.0 and self.v < 0.05 and not stepping_round:
             self.waited += dt
             if self.waited > GIVE_UP_S:             # it is not moving: go back the other way
                 self.u, self.waited = -self.u, 0.0
@@ -294,10 +347,18 @@ class Movers:
     (.score, go2_world/score.py)."""
 
     def __init__(self, model, data, lock, n_people, lift=None, emulator=("127.0.0.1", MOVERS_PORT),
-                 standers=()):
+                 standers=(), walls_xml=None):
         if n_people + len(standers) > MAX_PEOPLE:
             raise ValueError(f"at most {MAX_PEOPLE} people, walking and standing")
         self.model, self.data, self.lock, self.lift = model, data, lock, lift
+        # Walls and crates alone, for wall(): the building as written, no dog,
+        # no people, no car. Its own model, so nothing moving is ever in it.
+        import mujoco
+        from go2_world.scene import BUILDING
+        self.walls = mujoco.MjModel.from_xml_path(walls_xml or BUILDING)
+        self.walls_data = mujoco.MjData(self.walls)
+        mujoco.mj_forward(self.walls, self.walls_data)
+        self._wgeom = np.zeros(1, np.int32)
         self.mocap = [int(model.body(f"person_{k}").mocapid[0]) for k in range(MAX_PEOPLE)]
         self.body = [int(model.body(f"person_{k}").id) for k in range(MAX_PEOPLE)]
         self._geom = np.zeros(1, np.int32)
@@ -336,12 +397,23 @@ class Movers:
         walls, the trolley, the dog and other people all count."""
         import mujoco
         best = math.inf
-        for h in ROOM_H:
-            d = mujoco.mj_ray(self.model, self.data, np.array([w.x, w.y, w.z + h]),
-                              np.array([0.0, side, 0.0]), None, 1, self.body[k], self._geom)
-            if d >= 0:
-                best = min(best, d)
+        # Here and ahead along their way (ROOM_AHEAD): a doorway beside them is
+        # not room to step into when the wall is back a step further on.
+        for a in ROOM_AHEAD:
+            for h in ROOM_H:
+                d = mujoco.mj_ray(self.model, self.data, np.array([w.x + a * w.u, w.y, w.z + h]),
+                                  np.array([0.0, side, 0.0]), None, 1, self.body[k], self._geom)
+                if d >= 0:
+                    best = min(best, d)
         return best
+
+    def wall(self, w, x, y, dx, dy):
+        """Metres free from (x, y) at walker w's floor, towards (dx, dy), among
+        the walls and crates alone (see BOX_LEAD); inf for nothing."""
+        import mujoco
+        d = mujoco.mj_ray(self.walls, self.walls_data, np.array([x, y, w.z + WALL_H]),
+                          np.array([dx, dy, 0.0]), None, 1, -1, self._wgeom)
+        return math.inf if d < 0 else d
 
     def oncoming(self, k, w, side):
         """Somebody walking against walker k, on its `side` (+1: +y) of it,
@@ -371,7 +443,8 @@ class Movers:
                     self.data.mocap_pos[self.mocap[k]] = w.tick(
                         dt, dog, lambda side, k=k, w=w: self.room(k, w, side), dog_v,
                         lambda side, k=k, w=w: self.oncoming(k, w, side), sim_dt=sim_dt,
-                        dog_yaw=yaw)
+                        dog_yaw=yaw,
+                        wall=lambda x, y, dx, dy, w=w: self.wall(w, x, y, dx, dy))
                 for j, s in enumerate(self.standers):
                     self.data.mocap_pos[self.mocap[len(self.walkers) + j]] = s.tick(
                         dt, dog, sim_dt=sim_dt)
