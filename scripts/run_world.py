@@ -11,6 +11,8 @@ and the LiDAR emulator cannot tell the two apart.
   python scripts/run_world.py --headless --stand=3.0,0.8 en9        # somebody standing in the trolley's north gap
   python scripts/run_world.py --headless --walker=6.0,0.5 en9       # somebody slower walking ahead in the dog's lane
   python scripts/run_world.py --headless --record=run.mp4 --puddle=9.5,-0.6,0.34 en9   # a puddle drawn in the video
+  python scripts/run_world.py --headless --camera=192.168.55.100 en9   # the dog's camera, served to the brain
+                                                                        # (go2_world/camera.py, tcp 9883)
 
 --held-pd: unitree_mujoco's own motor model, the torque worked out once per
 LowCmd and held until the next. By default the PD runs every physics step
@@ -40,6 +42,8 @@ SPAWN = None                 # --spawn X,Y,YAW: the dog elsewhere than the origi
 PEOPLE = 0                   # --people=N: people walking the corridors, N on EVERY floor (0-6, crowd.LANES)
 LIFT_LISTEN = "127.0.0.1"    # --lift-listen=IP: take lift calls there (the brain on another machine)
 RECORD = None               # --record=PATH: the world to an MP4 while it runs
+CAMERA = None                # --camera=IP[:PORT]: render the dog's camera here (people and all) and
+                             # serve it on tcp IP:PORT (default 9883) to the brain (go2_world/camera.py)
 STAND = []                   # --stand=X,Y[,SECONDS[,FLOOR]]: somebody standing still (crowd.Stander),
                              # for SECONDS of wall clock then gone (default: for good), floor 1
 WALK = []                    # --walker=X0,V[,X1[,Y[,FLOOR]]]: somebody walking from X0 to X1
@@ -56,6 +60,10 @@ for a in sys.argv[1:]:
         continue
     if a.startswith("--people="):
         PEOPLE = int(a.split("=", 1)[1])
+        continue
+    if a.startswith("--camera="):
+        host, _, port = a.split("=", 1)[1].partition(":")
+        CAMERA = (host, int(port) if port else None)
         continue
     if a.startswith("--record="):
         RECORD = os.path.abspath(a.split("=", 1)[1])
@@ -158,6 +166,13 @@ if RECORD:
     rec = Recorder(sim["mj_model"], sim["mj_data"], sim["locker"], RECORD, puddles=PUDDLES).start()
     print(f"recorder: {RECORD}" + (f", {len(PUDDLES)} puddle(s) drawn" if PUDDLES else ""), flush=True)
 
+cam = None
+if CAMERA:
+    from go2_world.camera import CAM_PORT, Camera
+    host, port = CAMERA[0], CAMERA[1] or CAM_PORT
+    cam = Camera(sim["mj_model"], sim["mj_data"], sim["locker"], host=host, port=port).start()
+    print(f"camera: the dog's lens on tcp {host}:{port} (pixels only)", flush=True)
+
 
 def _finish(signum, frame):
     # Stopped with pkill (SIGTERM) or Ctrl-C: the run's truth (go2_world/score.py)
@@ -165,6 +180,9 @@ def _finish(signum, frame):
     # signal would have. The sim's threads are not daemons, so exit hard.
     for line in movers.score.summary():
         print(line, flush=True)
+    if cam is not None:
+        cam.close()
+        print(cam.summary(), flush=True)
     if rec is not None:
         rec.close()
     os._exit(128 + signum)
