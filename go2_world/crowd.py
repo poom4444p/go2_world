@@ -35,7 +35,6 @@ import time
 
 import numpy as np
 
-MAX_PEOPLE = 6
 PARKED = (0.0, 0.0, -20.0)
 RADIUS, HEIGHT = 0.22, 1.70            # a shoulder's half-width, standing height
 MOVERS_PORT = 9882                     # run_world -> run_lidar: people and the lift car
@@ -43,17 +42,44 @@ FLOOR_HEIGHT = 2.2
 KEEP_RIGHT = True                      # people walk on their right (Denmark); False: fixed lanes
 
 # Lanes in this (go2_world) frame: floor, y, x from, x to, walking speed.
-# With KEEP_RIGHT the sign of y is ignored: it is the side of their travel.
-# Floor 1's corridor runs along x at y = 0 (walls at about +-1.4); the
-# trolley stands at x 2.4..3.6 on the south half; the lift is at the east end.
-ROUTES = [
-    (1, +0.70, 6.0, 16.0, 1.0),
-    (1, -0.70, 8.0, 20.0, 0.9),
-    (1, +0.60, 12.0, 22.0, 0.8),
-    (3, -0.60, 15.0, 23.0, 0.8),
-    (2, +0.60, 6.0, 18.0, 1.0),
-    (1, -0.60, -12.0, -2.0, 1.0),
-]
+# With KEEP_RIGHT the sign of y is ignored: it is how far off the middle.
+# Each floor's corridor runs along x at y = 0 (walls at about +-1.4, from
+# x -18 to 24); the lift is at the east end. Crates on the south half
+# (floor 1 the trolley at x 2.4..3.6, floor 2 x -4.5 and 13..14, floor 3
+# x 20.5) are gone round (BOX_LEAD). --people=N walks the first N lanes of
+# EVERY floor: the dog meets N on whichever floor it is on (it was N in the
+# whole building, most of them on floor 1: room 201 met one, HIL 11-19).
+# Floor 1's lanes keep clear of the dog's spawn (0, 0) and its user behind it.
+LANES = {
+    1: [(1, 0.70, 6.0, 16.0, 1.0),
+        (1, 0.70, 8.0, 20.0, 0.9),
+        (1, 0.60, 12.0, 22.0, 0.8),
+        (1, 0.60, -12.0, -3.0, 1.0),
+        (1, 0.65, -17.0, -6.0, 0.9),
+        (1, 0.65, 4.0, 14.0, 0.85)],
+    2: [(2, 0.60, 6.0, 18.0, 1.0),
+        (2, 0.65, -16.0, -4.0, 0.9),
+        (2, 0.70, -8.0, 6.0, 1.0),
+        (2, 0.60, 10.0, 22.0, 0.85),
+        (2, 0.65, -14.0, 2.0, 0.8),
+        (2, 0.70, 0.0, 14.0, 0.95)],
+    3: [(3, 0.60, 15.0, 22.0, 0.8),
+        (3, 0.65, -16.0, -4.0, 1.0),
+        (3, 0.70, -8.0, 6.0, 0.9),
+        (3, 0.60, 0.0, 12.0, 1.0),
+        (3, 0.65, 6.0, 20.0, 0.85),
+        (3, 0.70, -12.0, 2.0, 0.8)],
+}
+PER_FLOOR = min(len(v) for v in LANES.values())   # --people=N: at most this many a floor
+EXTRA = 2                                         # bodies for --stand / --walker on top
+MAX_PEOPLE = PER_FLOOR * len(LANES) + EXTRA       # bodies in the scene, all of them parked
+
+
+def lanes(per_floor):
+    """The lanes walked with `per_floor` people on every floor, floor by floor."""
+    if not 0 <= per_floor <= PER_FLOOR:
+        raise ValueError(f"--people is per floor, 0 to {PER_FLOOR}, not {per_floor}")
+    return [lane for f in sorted(LANES) for lane in LANES[f][:per_floor]]
 
 
 def people_xml(n=MAX_PEOPLE):
@@ -346,9 +372,10 @@ class Movers:
     the lift car are, 20 times a second; scores the run's truth as it goes
     (.score, go2_world/score.py)."""
 
-    def __init__(self, model, data, lock, n_people, lift=None, emulator=("127.0.0.1", MOVERS_PORT),
+    def __init__(self, model, data, lock, per_floor, lift=None, emulator=("127.0.0.1", MOVERS_PORT),
                  standers=(), walls_xml=None):
-        if n_people + len(standers) > MAX_PEOPLE:
+        walk = lanes(per_floor)                 # per_floor on every floor (see LANES)
+        if len(walk) + len(standers) > MAX_PEOPLE:
             raise ValueError(f"at most {MAX_PEOPLE} people, walking and standing")
         self.model, self.data, self.lock, self.lift = model, data, lock, lift
         # Walls and crates alone, for wall(): the building as written, no dog,
@@ -362,8 +389,8 @@ class Movers:
         self.mocap = [int(model.body(f"person_{k}").mocapid[0]) for k in range(MAX_PEOPLE)]
         self.body = [int(model.body(f"person_{k}").id) for k in range(MAX_PEOPLE)]
         self._geom = np.zeros(1, np.int32)
-        self.walkers = [Walker(*ROUTES[k], phase=0.37 * k, keep_right=KEEP_RIGHT)
-                        for k in range(n_people)]
+        self.walkers = [Walker(*lane, phase=0.37 * k, keep_right=KEEP_RIGHT)
+                        for k, lane in enumerate(walk)]
         self.standers = list(standers)          # bodies after the walkers' (and
                                                 # slow walkers: anything with tick/pos)
         self.emulator = emulator

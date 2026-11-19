@@ -37,7 +37,7 @@ from go2_world.scene import SIMULATE_DT, UNITREE_MUJOCO, write_scene  # noqa: E4
 HEADLESS = "--headless" in sys.argv[1:]
 HELD_PD = "--held-pd" in sys.argv[1:]  # unitree_mujoco's own: torque once per LowCmd (go2_world/motor_pd.py)
 SPAWN = None                 # --spawn X,Y,YAW: the dog elsewhere than the origin (this frame, rad)
-PEOPLE = 0                   # --people=N: people walking the corridors (go2_world/crowd.py)
+PEOPLE = 0                   # --people=N: people walking the corridors, N on EVERY floor (0-6, crowd.LANES)
 LIFT_LISTEN = "127.0.0.1"    # --lift-listen=IP: take lift calls there (the brain on another machine)
 RECORD = None               # --record=PATH: the world to an MP4 while it runs
 STAND = []                   # --stand=X,Y[,SECONDS[,FLOOR]]: somebody standing still (crowd.Stander),
@@ -143,7 +143,8 @@ print(f"lift: car at floor 1, call it on udp {LIFT_LISTEN}:{LIFT_PORT}", flush=T
 movers = Movers(sim["mj_model"], sim["mj_data"], sim["locker"], PEOPLE, lift=lift.lift,
                 standers=[Stander(x, y, floor, stay) for x, y, floor, stay in STAND]
                 + [SlowWalker(x0, v, x1, y, floor) for x0, v, x1, y, floor in WALK]).start()
-print(f"world: {PEOPLE} people walking; movers to udp 127.0.0.1:{MOVERS_PORT}", flush=True)
+print(f"world: {PEOPLE} people walking a floor ({len(movers.walkers)} in all); "
+      f"movers to udp 127.0.0.1:{MOVERS_PORT}", flush=True)
 for x, y, floor, stay in STAND:
     print(f"world: somebody standing at ({x}, {y}) floor {floor}"
           f"{'' if stay is None else f' for {stay:.0f} s'}", flush=True)
