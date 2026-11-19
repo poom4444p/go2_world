@@ -18,6 +18,9 @@ GO2 = os.path.join(UNITREE_MUJOCO, "unitree_robots", "go2")
 # Go2's motors close the PD at kHz, so the sim, not the gains, is what changes.
 SIMULATE_DT = 0.002
 
+# The dog's lens (go2_world/camera.py): placed per frame on the rendered copy.
+from go2_world.camera import FOVY as CAM_FOVY  # noqa: E402
+
 SCENE = """<mujoco model="go2_world">
   <include file="{go2}/go2.xml"/>
   <compiler meshdir="{go2}/assets"/>
@@ -32,6 +35,9 @@ SCENE = """<mujoco model="go2_world">
     <texture type="skybox" builtin="gradient" rgb1="0.55 0.62 0.72" rgb2="0.82 0.85 0.9"
              width="512" height="512"/>
   </asset>
+  <worldbody>
+    <camera name="dogcam" pos="0 0 0" fovy="{fovy}"/>
+  </worldbody>
 </mujoco>
 """
 
@@ -92,5 +98,5 @@ def write_scene(out_dir=os.path.join(ROOT, "build")):
         out.write(building_with_car(f.read()))
     path = os.path.join(out_dir, "scene.xml")
     with open(path, "w") as f:
-        f.write(SCENE.format(go2=GO2, building=building))
+        f.write(SCENE.format(go2=GO2, building=building, fovy=CAM_FOVY))
     return path
