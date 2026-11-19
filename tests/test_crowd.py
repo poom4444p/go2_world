@@ -219,9 +219,25 @@ def test_movers_put_standers_after_the_walkers():
     m = mujoco.MjModel.from_xml_string(WALLED.format(people=crowd.people_xml()))
     d = mujoco.MjData(m)
     movers = Movers(m, d, threading.Lock(), 2, standers=[crowd.Stander(3.0, 0.8)])
-    assert movers.state()["people"][2] == [3.0, 0.8, 0.0]
-    with pytest.raises(ValueError):
-        Movers(m, d, threading.Lock(), crowd.MAX_PEOPLE, standers=[crowd.Stander(0, 0)])
+    assert len(movers.walkers) == 2 * len(crowd.LANES)          # 2 on every floor
+    assert movers.state()["people"][len(movers.walkers)] == [3.0, 0.8, 0.0]
+    with pytest.raises(ValueError):                               # per floor, at most PER_FLOOR
+        Movers(m, d, threading.Lock(), crowd.PER_FLOOR + 1)
+    with pytest.raises(ValueError):                               # no body left for a stander
+        Movers(m, d, threading.Lock(), crowd.PER_FLOOR,
+               standers=[crowd.Stander(0, k) for k in range(crowd.EXTRA + 1)])
+
+
+def test_people_per_floor_walk_every_floor_clear_of_the_spawn():
+    for n in range(crowd.PER_FLOOR + 1):
+        lanes = crowd.lanes(n)
+        assert [sum(1 for l in lanes if l[0] == f) for f in (1, 2, 3)] == [n, n, n]
+    for k, lane in enumerate(crowd.lanes(crowd.PER_FLOOR)):
+        floor, y, x0, x1, v = lane
+        assert -18.0 < min(x0, x1) and max(x0, x1) < 23.0 and 0.5 <= abs(y) <= 0.75
+        if floor == 1:          # nobody starts on the dog at (0, 0) or its user behind it
+            x = Walker(*lane, phase=0.37 * k, keep_right=True).pos()[0]
+            assert x > 2.0 or x < -3.0
 
 
 def test_a_slow_walker_waits_parked_until_the_dog_comes_near():
@@ -256,7 +272,7 @@ def test_movers_put_slow_walkers_with_the_standers():
     d = mujoco.MjData(m)
     w = crowd.SlowWalker(6.0, 0.5)
     movers = Movers(m, d, threading.Lock(), 2, standers=[crowd.Stander(3.0, 0.8), w])
-    assert movers.state()["people"][3] == list(crowd.PARKED)
+    assert movers.state()["people"][len(movers.walkers) + 1] == list(crowd.PARKED)
 
 
 def test_walkers_walk_on_simulated_time_when_given():
